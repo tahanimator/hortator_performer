@@ -12,6 +12,9 @@ is its drummer.
 > **This fork** (by Meat Proxy) adds one option to Hortator: **MENU > MUTE SCREEN: LATCH**, which keeps the MUTE
 > screen up after GLO is let go, so the mutes can be played with one hand ([Mutes](#mutes)). Everything else is
 > DEADACTIVE's Hortator as released in 0.26.0.
+>
+> **Install this fork:** <https://tahanimator.github.io/hortator_performer/webapp/installer/> (Chrome or Edge, the
+> FM-1 on its USB cable). Rebuilt from `main` on every push.
 
 - **Play it in your browser:** <https://deadactive.github.io/hortator/>. The page runs the real firmware, compiled
   to WebAssembly, on a 3D FM-1 you can play with the mouse, a touch screen or the computer keyboard.

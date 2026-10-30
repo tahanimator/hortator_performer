@@ -1,6 +1,7 @@
 # Fork (Meat Proxy): build the installable packages on GitHub, so no local JieLi toolchain is needed.
 # Runs on every push, or from the Actions tab (Run workflow). Each job's artifact holds its .fwsc package;
-# the standard job's also holds the local web installer site that DRUM_PACKAGE builds alongside it.
+# the standard job's also holds the web installer site that DRUM_PACKAGE builds alongside it, which the pages
+# job publishes (main only) at https://tahanimator.github.io/hortator_performer/
 name: build firmware
 
 on:
@@ -51,6 +52,28 @@ jobs:
           path: |
             build/*.fwsc
             build/site/
+
+      - name: Hand the installer site to Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+  # The web installer (Chrome / Edge, Web MIDI over the FM-1's USB cable) with this fork's package, at
+  # https://tahanimator.github.io/hortator_performer/ (Settings > Pages > Source: GitHub Actions)
+  pages:
+    needs: standard
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}webapp/installer/
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
 
   bluetooth:
     runs-on: ubuntu-latest
