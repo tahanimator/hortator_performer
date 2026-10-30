@@ -1,6 +1,6 @@
 # Fork (Meat Proxy): build the installable packages on GitHub, so no local JieLi toolchain is needed.
-# Runs on every push, or from the Actions tab (Run workflow). The run's artifact holds both packages
-# (standard and Bluetooth) and the local web installer site that DRUM_PACKAGE builds alongside them.
+# Runs on every push, or from the Actions tab (Run workflow). Each job's artifact holds its .fwsc package;
+# the standard job's also holds the local web installer site that DRUM_PACKAGE builds alongside it.
 name: build firmware
 
 on:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  standard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,7 +17,6 @@ jobs:
         run: pip3 install --break-system-packages Pillow || pip3 install Pillow
 
       - name: JieLi toolchain (cached)
-        id: tc
         uses: actions/cache@v4
         with:
           path: ~/.jieli/toolchain
@@ -33,19 +32,68 @@ jobs:
           git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
             https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
 
-      - name: JieLi AC79 SDK V1.2.0 (the Bluetooth libraries the BLE build links, pinned by sha256)
-        run: |
-          curl -fL --retry 3 -o ~/bt-sdk.tar.gz \
-            "https://github.com/Jieli-Tech/fw-AC79_AIoT_SDK/archive/refs/tags/release/AC79NN_SDK_V1.2.0.tar.gz"
-          tar -xzf ~/bt-sdk.tar.gz -C ~
-          ls -d ~/fw-AC79_AIoT_SDK-*
-          mv ~/fw-AC79_AIoT_SDK-release-AC79NN_SDK_V1.2.0 ~/ac79-bt-sdk
-          ls ~/ac79-bt-sdk/cpu/wl82/liba/btctrler.a
-
-      - name: Build both packages (standard + Bluetooth)
+      - name: Build the standard package
         env:
           DRUM_PACKAGE: "1"       # write the installable .fwsc (the fork skips it otherwise)
-          DRUM_BUNDLE: "1"        # the Bluetooth package too, in its own run
+        run: |
+          set -o pipefail
+          ./build.sh 2>&1 | tee build.log || {
+            tail -40 build.log | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}' | sed 's/^/::error title=build.sh failed::/'
+            echo
+            exit 1
+          }
+          ls -la build/*.fwsc
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: hortator-mute-latch-standard
+          path: |
+            build/*.fwsc
+            build/site/
+
+  bluetooth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python with Pillow
+        run: pip3 install --break-system-packages Pillow || pip3 install Pillow
+
+      - name: JieLi toolchain (cached)
+        uses: actions/cache@v4
+        with:
+          path: ~/.jieli/toolchain
+          key: jieli-toolchain-v2
+
+      - name: Fetch the JieLi toolchain (when the cache has no compiler)
+        run: |
+          [ -x ~/.jieli/toolchain/pi32v2/bin/clang ] || { rm -rf ~/.jieli/toolchain; sh tools/get_toolchain.sh; }
+
+      - name: JieLi AC79 SDK
+        run: |
+          git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
+            https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
+
+      - name: JieLi AC79 SDK V1.2.0 (the Bluetooth libraries, pinned by sha256)
+        run: |
+          refs=$( { git ls-remote --tags --heads https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git;
+                    git ls-remote --tags --heads https://github.com/Jieli-Tech/fw-AC79_AIoT_SDK.git; } 2>&1 \
+                  | awk '{print $2}' | sed 's#refs/[a-z]*/##; s/\^{}//' | sort -u )
+          ref=$(echo "$refs" | grep -E 'V1\.2\.0' | head -1)
+          if [ -z "$ref" ]; then
+            echo "::error title=no V1.2.0 ref::$(echo "$refs" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "using $ref"
+          git clone --depth 1 --branch "$ref" https://github.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/ac79-bt-sdk ||
+            git clone --depth 1 --branch "$ref" https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/ac79-bt-sdk
+          ls ~/ac79-bt-sdk/cpu/wl82/liba/btctrler.a
+
+      - name: Build the Bluetooth package
+        env:
+          DRUM_PACKAGE: "1"
+          FELUCCA_BLE: "1"
           JIELI_DOCKER: "1"       # the Bluetooth build runs the toolchain in Docker (the SDK mounted at /sdk)
           AC79_BT_SDK: /home/runner/ac79-bt-sdk
         run: |
@@ -55,14 +103,10 @@ jobs:
             echo
             exit 1
           }
+          ls -la build/*.fwsc
 
-      - name: List the outputs
-        run: ls -la build/*.fwsc
-
-      - name: Upload the packages
+      - name: Upload the package
         uses: actions/upload-artifact@v4
         with:
-          name: hortator-mute-latch
-          path: |
-            build/*.fwsc
-            build/site/
+          name: hortator-mute-latch-bluetooth
+          path: build/*.fwsc
