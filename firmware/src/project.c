@@ -1985,6 +1985,7 @@ static void persist_boot(void)                    /* before settings_init / pane
     fx_metro = 0;                                     /* METRO OFF, as well */
     backlight = 0;                                    /* BACKLIGHT OFF, as well */
     midi_thru = 0;                                    /* MIDI THRU OFF, as well */
+    mutelatch = 0;                                    /* MUTE SCREEN HOLD, as well */
 #if USB10_BUILD
     usbaud = 0;                                       /* USB AUDIO 2 CH, as well */
 #endif
@@ -2038,6 +2039,7 @@ static void persist_boot(void)                    /* before settings_init / pane
         settings.palette = p.palette & 0xFFu;       /* bits 0..7 the palette; bit 8 AUTOSTART (BLE: bt_page.c) */
         btset.bt_auto = (p.palette >> 8) & 1u;
         midi_thru = (uint8_t)((p.palette >> 14) & 1u);   /* bit 14 = MIDI THRU (midi_out.c): older records read OFF */
+        mutelatch = (p.palette >> 15) & 1u;         /* bit 15 = MUTE SCREEN LATCH: older records read HOLD */
 #if USB10_BUILD
         usbaud = (p.palette >> 12) & 3u;            /* bits 12..13 = USB AUDIO: 0 2 CH (older records), 1 10 CH MIX
                                                      * (e586073's 10 CH), 2 10 CH FX, 3 none: 2 CH (the Bluetooth
@@ -2204,6 +2206,7 @@ static void settings_save(void)                    /* asked for while playing: w
     p.palette |= (usbaud & 3u) << 12;
 #endif
     p.palette |= (uint32_t)(midi_thru & 1u) << 14;
+    p.palette |= (mutelatch & 1u) << 15;              /* (an older Hortator ignores bit 15: HOLD there) */
     /* an older Hortator reads a palette out of range from bit 8: its display settings reset; 9..11 BACKLIGHT's level
      * (item 9: an older one reads lowcut's bit 7, ON); 12 USB AUDIO 10 CH (an older one ignores it); 14 MIDI THRU (an
      * older one ignores it) */

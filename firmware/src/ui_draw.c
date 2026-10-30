@@ -1809,7 +1809,8 @@ static void graph_perf(void)
 static void draw_mute(void)
 {
     uint32_t k, blink = (fm1_ticks() / (250u * 1000u * FM1_TICKS_PER_US)) & 1u;
-    uint32_t sig = settings.mutebar * 7u + song.mute_q * 977u + (song.mute_q ? blink + 1u : 0u) * 131u + ui.ml.on * 5003u;
+    uint32_t sig = settings.mutebar * 7u + song.mute_q * 977u + (song.mute_q ? blink + 1u : 0u) * 131u + ui.ml.on * 5003u +
+                   mute_latched * 40009u;
     int32_t x, w;
     char b[24];
     for (k = 0; k < NTRK; k++)
@@ -1859,7 +1860,9 @@ static void draw_mute(void)
                                                        * when not chosen), "G4 LEARN: OFF" / "ON" (MIDI LEARN) */
     cv_rect(0, 0, 1, 62, C_INK);
     cv_rect(239, 0, 1, 62, C_INK);
-    str_cpy(b, settings.mutebar ? "MUTE: NEXT BAR" : "MUTE: NOW", sizeof b);
+    str_cpy(b, mute_latched ? (settings.mutebar ? "LATCHED: NEXT BAR" : "LATCHED: NOW")   /* (MENU MUTE SCREEN LATCH:
+                                                       * GLO or OCT- closes it) */
+                            : settings.mutebar ? "MUTE: NEXT BAR" : "MUTE: NOW", sizeof b);
     md_text((240 - md_text_w(&MD_F3, 2, b)) / 2, 4, &MD_F3, 2, b, C_INK);
     w = md_text_w(&MD_F3, 2, "C# NOW  D# NEXT BAR");
     x = (240 - w) / 2;

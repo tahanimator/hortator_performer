@@ -5,6 +5,13 @@ released yet are listed under Unreleased.
 
 ## Unreleased
 
+- **MUTE SCREEN: LATCH** (fork, Meat Proxy): a new menu row, MUTE SCREEN, HOLD (as before) or LATCH. With LATCH,
+  letting go of GLO after the MUTE screen opened keeps it up, and the white keys go on toggling the mutes with GLO
+  up, for one-handed mute performance. The next GLO press, or OCT-, closes it and does nothing else. A GLO tap still
+  opens GLOBAL. Kept over power-off (an older Hortator reads HOLD). The menu's rows are a pixel closer to fit the
+  twelfth.
+- Host tests build on Linux too (no instruction counter there; the cost checks stay macOS's).
+
 ## 0.26.0 - 2026-10-28
 
 - **Steadier key backlight**: the glow of BACKLIGHT DIM LO and DIM HI (the unlit keys and idle buttons) is now a very

@@ -781,9 +781,20 @@ static void mute_keys(uint32_t hits)                   /* the keys the ISR gave 
         ml_toggle();
 }
 static int cue_owns_keys(void);
+/* MENU > MUTE SCREEN LATCH (fork: Meat Proxy): GLO held (or with a key) opens the MUTE screen as before; let go, it stays
+ * up (latched) and the white keys keep toggling the mutes with GLO up, for one hand. The next GLO press closes it and
+ * does nothing else (no GLOBAL page on its release, no screen while held); OCT- closes it too (ui_input). A tap still
+ * opens GLOBAL. HOLD (the default): as before */
+static uint8_t glo_eat;                                /* this GLO press closed the latched screen: its release is no tap */
+static void mute_unlatch(void)
+{
+    mute_latched = 0;
+    ui.mute = 0;
+    ui.force = 1;
+}
 static void glo_input(uint32_t now, uint32_t notes)
 {
-    uint32_t bit = 1u << panel.btn[B_GLO], *t0 = &ui.glo_t0, hits = 0;
+    uint32_t bit = 1u << panel.btn[B_GLO], *t0 = &ui.glo_t0, hits = 0, spent;
     if (kb_mute_hit && !cue_owns_keys()) {             /* (SAVE held: the cue map's, cue_input) */
         fm1_irq_off();
         hits = kb_mute_hit;
@@ -791,13 +802,21 @@ static void glo_input(uint32_t now, uint32_t notes)
         fm1_irq_on();
     }
     if (fm1_in.buttons & bit) {
-        if (!*t0)
+        if (!*t0) {
             *t0 = (now & ~15u) | GLO_DOWN;
-        if (!(*t0 & GLO_OPEN) && glo_dead())
+            if (mute_latched) {                         /* LATCH: this press closes the screen, and is spent */
+                mute_unlatch();
+                glo_eat = 1;
+            }
+        }
+        spent = glo_eat;
+        if (glo_eat)
+            ;
+        else if (!(*t0 & GLO_OPEN) && glo_dead())
             *t0 |= GLO_DEAD;
         else if (!(*t0 & GLO_OPEN) && (ui.layer || ui.fx_t0))
             *t0 |= GLO_PLAIN;
-        if (!(*t0 & (GLO_OPEN | GLO_DEAD | GLO_PLAIN)) &&
+        if (!glo_eat && !(*t0 & (GLO_OPEN | GLO_DEAD | GLO_PLAIN)) &&
             (notes || hits || now - (*t0 & ~15u) >= GLO_HOLD_MS * 1000u * FM1_TICKS_PER_US)) {
             *t0 |= GLO_OPEN;                            /* the MUTE screen */
             ui.mute = 1;
@@ -805,15 +824,24 @@ static void glo_input(uint32_t now, uint32_t notes)
             grid_drop_holds();                          /* a grid key held edits nothing under it */
         }
     } else if (*t0) {
-        if (!(*t0 & (GLO_OPEN | GLO_DEAD)) && !glo_dead())
+        uint32_t was = *t0;
+        spent = glo_eat;
+        if (!glo_eat && !(was & (GLO_OPEN | GLO_DEAD)) && !glo_dead())
             open_family(FAM_GLO);                       /* a tap: the GLOBAL pages */
         *t0 = 0;
         if (ui.mute) {
-            ui.mute = 0;                                /* let go: the screen before */
-            ui.force = 1;
+            if (mutelatch && (was & GLO_OPEN) && !glo_dead()) {
+                mute_latched = 1;                       /* LATCH: the screen stays, the keys stay its own */
+                ui_message("MUTES LATCHED");
+            } else {
+                ui.mute = 0;                            /* let go: the screen before */
+                ui.force = 1;
+            }
         }
-    }
-    if (hits && !glo_dead())
+        glo_eat = 0;
+    } else
+        spent = 0;
+    if (hits && !glo_dead() && !spent)                 /* (keys struck with the closing GLO: nothing) */
         mute_keys(hits);
     mute_mask = (mute_mask & ~bit) |                   /* (SAVE's bit: cue_input's) */
                 ((*t0 & GLO_OPEN) || (!(*t0 & (GLO_DEAD | GLO_PLAIN)) && !glo_dead() && !ui.layer && !ui.fx_t0) ? bit
@@ -1160,6 +1188,8 @@ static void ui_input(void)
                                                          * aside; a HOME / REC press under it is no tap or hold */
         if ((pressed >> panel.btn[B_PLAY]) & 1u)
             play_press();
+        if (mute_latched && ((pressed >> panel.btn[B_OCTDN]) & 1u))
+            mute_unlatch();                             /* LATCH: OCT- closes the screen too (BACK) */
         if (ui.home_t0)
             ui.home_t0 |= 2u;
         if (ui.rec_t0)

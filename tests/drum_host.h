@@ -6,7 +6,9 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#ifdef __APPLE__
 #include <libproc.h>
+#endif
 #include <sys/resource.h>
 #define __attribute__(x)
 #define memset felucca_memset
@@ -167,8 +169,10 @@ static uint32_t hit_age(const track_t *t)          /* changes on every hit of t 
 
 static uint64_t instr_now(void)
 {
+#ifdef __APPLE__
     struct rusage_info_v4 ri;
     if (!proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t *)&ri))
         return ri.ri_instructions;
-    return 0;
+#endif
+    return 0;                                        /* (Linux: no instruction counter here; the cost checks are macOS's) */
 }

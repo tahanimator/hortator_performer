@@ -26,6 +26,8 @@ static volatile uint32_t mute_mask;   /* main: GLO's bit while the MUTE screen m
                                        * (a key struck with it is the screen's) */
 static volatile uint32_t kb_mute;     /* ISR: the keys held that are the MUTE screen's (pressed with GLO) */
 static volatile uint32_t kb_mute_hit; /* ISR -> main: those presses, until the UI takes them */
+static volatile uint8_t mute_latched; /* main: the MUTE screen is latched up (MENU MUTE SCREEN LATCH, ui_input.c
+                                       * glo_input): the keys are its own with GLO up, as if GLO were held */
 static volatile uint8_t ml_keys;      /* main: MIDI LEARN is on (ui_learn.c): a PERFORM layer key picks its effect */
 static volatile uint32_t ml_kb_hit;   /* ISR -> main: those presses (no effect played), until the UI takes them */
 /* key index (0 = F3, the lowest key) of the white keys F3 G3 A3 B3 C4 D4 E4 F4 -> tracks 1..8 */
@@ -436,8 +438,9 @@ static void keyboard_block(void)
                 else
                     perf_press(perf_key(key), 1);
                 ch &= ~bit;
-            } else if (fm1_in.buttons & mute_mask) {   /* GLO held: the MUTE screen's until let go (ui_input.c
-                                                         * glo_input takes kb_mute_hit): no note, no MIDI */
+            } else if ((fm1_in.buttons & mute_mask) || mute_latched) {   /* GLO held (or the screen latched): the
+                                                         * MUTE screen's until let go (ui_input.c glo_input takes
+                                                         * kb_mute_hit): no note, no MIDI */
                 kb_mute |= bit;
                 kb_mute_hit |= bit;
                 ch &= ~bit;

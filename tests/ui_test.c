@@ -1653,6 +1653,117 @@ static void test_mute_screen(void)
     settings.mutebar = 0;
 }
 
+/* fork (Meat Proxy): MENU > MUTE SCREEN LATCH. GLO held then let go: the MUTE screen stays up and the white keys toggle
+ * the mutes with GLO up (no note, no select); the next GLO press closes it and is spent (no GLOBAL page, no screen while
+ * held); OCT- closes it too; a GLO tap still opens GLOBAL; HOLD (the default) as before; the setting is in the menu */
+static int menu_value_is(uint32_t row, const char *s, int sel);
+static void latch_key_tap(uint32_t key)              /* a key tapped with no button held */
+{
+    keys(1u << key);
+    ui_frame();
+    ui_frame();
+    keys(0);
+    ui_frame();
+}
+static void test_mute_latch(void)
+{
+    uint32_t a, sel, k;
+    ui_host_init();
+    settings.mutebar = 0;
+    check("MUTE SCREEN: HOLD by default", mutelatch == 0u);
+    ui.menu = 1;                                     /* the menu row: OCT+ toggles HOLD / LATCH */
+    ui.menu_sel = MI_MUTE;
+    ui.force = 1;
+    ui_frame();
+    check("menu: the MUTE SCREEN row shows HOLD", str_eq(MI_NAME[MI_MUTE], "MUTE SCREEN") && menu_value_is(MI_MUTE, "HOLD", 1));
+    tap(B_OCTUP);
+    ui.force = 1;
+    ui_frame();
+    check("menu: OCT+ on MUTE SCREEN = LATCH", mutelatch == 1u && ui.menu == 1 && menu_value_is(MI_MUTE, "LATCH", 1));
+    snap_page("fixes/menu_mute_latch");
+    ui.menu = 0;
+    ui.force = 1;
+    go_home();
+    ui_frame();
+
+    press(B_GLO);                                    /* a tap: GLOBAL, as before */
+    ui_frame();
+    release_all();
+    ui_frame();
+    check("LATCH: a GLO tap still opens GLOBAL, no screen", !ui.home && cur_fam() == FAM_GLO && !ui.mute && !mute_latched);
+    tap(B_HOME);
+
+    press(B_GLO);                                    /* held 0.4 s, let go: latched */
+    glo_hold_frames(450);
+    check("LATCH: GLO held 0.4 s opens the MUTE screen", ui.mute && !mute_latched);
+    release_all();
+    ui_frame();
+    check("LATCH: GLO let go, the screen stays (latched), no GLOBAL page", ui.mute && mute_latched && ui.home);
+    snap_page("fixes/mute_latched");
+
+    a = hit_age(&trk[2]);
+    sel = song.sel;
+    latch_key_tap(KEY_TRK_KEY[2]);
+    check("LATCH: key 3 with GLO up mutes track 3; no sound, no select",
+          trk[2].p[P_MUTE] == 1 && hit_age(&trk[2]) == a && song.sel == sel && !led_lit(14u + KEY_TRK_KEY[2]));
+    latch_key_tap(KEY_TRK_KEY[2]);
+    check("LATCH: key 3 again unmutes it", trk[2].p[P_MUTE] == 0 && hit_age(&trk[2]) == a);
+    latch_key_tap(22u);
+    check("LATCH: top D# = NEXT BAR with GLO up", settings.mutebar == 1u);
+    transport_req = 1;
+    seq_play_to(0, 2);
+    latch_key_tap(KEY_TRK_KEY[0]);
+    check("LATCH, NEXT BAR, playing: track 1's mute waits for the bar", trk[0].p[P_MUTE] == 0 && (song.mute_q & 1u));
+    seq_play_to(0, 0);
+    check("LATCH: at the bar, track 1 muted; still latched", trk[0].p[P_MUTE] == 1 && ui.mute && mute_latched);
+    turn(EN_K2, 5);
+    a = (uint32_t)trk[0].p[P_E1];
+    ui_frame();
+    check("LATCH: the knobs edit nothing under it", (uint32_t)trk[0].p[P_E1] == a);
+
+    press(B_GLO);                                    /* GLO again: closed, and spent */
+    ui_frame();
+    check("LATCH: a GLO press closes the screen", !ui.mute && !mute_latched);
+    a = hit_age(&trk[4]);
+    keys(1u << KEY_TRK_KEY[4]);                      /* a key struck while that GLO is still held: nothing */
+    glo_hold_frames(450);
+    check("LATCH: the closing GLO held on: no screen again, the key toggles nothing", !ui.mute && trk[4].p[P_MUTE] == 0);
+    keys(0);
+    release_all();
+    ui_frame();
+    check("LATCH: the closing GLO let go: no GLOBAL page, HOME as before", ui.home && !ui.mute && !mute_latched);
+    a = hit_age(&trk[1]);
+    sel = song.sel;
+    for (k = 0; k < 3u; k++)
+        ui_frame();
+
+    settings.mutebar = 0;                            /* (NOW: the toggle lands at once, the transport running) */
+    press(B_GLO);                                    /* GLO + a key: latched too on the release */
+    keys(1u << KEY_TRK_KEY[5]);
+    glo_hold_frames(2);
+    keys(0);
+    glo_hold_frames(1);
+    release_all();
+    ui_frame();
+    check("LATCH: GLO with a key, let go: track 6 muted, the screen latched", trk[5].p[P_MUTE] == 1 && ui.mute && mute_latched);
+    tap(B_OCTDN);
+    check("LATCH: OCT- closes the screen", !ui.mute && !mute_latched && ui.home);
+    latch_key_tap(KEY_TRK_KEY[5]);
+    check("after the latch: a key is the drum's again (track 6 still muted, the key no mute toggle)", trk[5].p[P_MUTE] == 1);
+    trk[5].p[P_MUTE] = 0;
+    trk[0].p[P_MUTE] = 0;
+
+    mutelatch = 0;                                   /* HOLD: let go, the screen goes (as before) */
+    press(B_GLO);
+    glo_hold_frames(450);
+    release_all();
+    ui_frame();
+    check("HOLD: GLO let go, the screen gone", !ui.mute && !mute_latched && ui.home);
+    transport_req = 2;
+    ui_frame();
+    settings.mutebar = 0;
+}
+
 /* Review focus 1: keys with GLO never play or record; GLO let go with a key held leaves nothing stuck */
 static void test_mute_screen_keys(void)
 {
@@ -2968,7 +3079,9 @@ static void test_theme_menu(void)
 /* the menu row's value: s in F3 at 2x right-aligned at the row's end (list_row 10..225), the row's pen, 2 px clear */
 static int menu_value_is(uint32_t row, const char *s, int sel)
 {
-    uint32_t w = (uint32_t)md_text_w(&MD_F3, 2, s) + 4u, h = 14u, x0 = 225u - 4u - (w - 4u) - 2u,
+    uint32_t w = (uint32_t)md_text_w(&MD_F3, 2, s) + 4u, h = MENU_DY < 14u ? MENU_DY : 14u,   /* (13 px rows: the next
+                                                     * row's cursor bar starts on this one's last pixel row) */
+             x0 = 225u - 4u - (w - 4u) - 2u,
              y0 = MENU_Y0 + row * MENU_DY - 2u, x, y;
     uint16_t pen = sel ? C_BG : C_INK, gr = sel ? C_INK : C_BG;
     cv_begin(w, h, gr);
@@ -9718,6 +9831,7 @@ int main(void)
     test_quick_mute();
     test_mute_screen();
     test_mute_screen_keys();
+    test_mute_latch();
     test_mute_screen_refused();
     test_save_tap_opens_projects();
     test_cue_keys_no_notes();

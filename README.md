@@ -9,6 +9,10 @@ on [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita.
 On a Roman galley, the *hortator* beat the drum that kept the rowers in time. Felucca is a Nile sailing boat; this
 is its drummer.
 
+> **This fork** (by Meat Proxy) adds one option to Hortator: **MENU > MUTE SCREEN: LATCH**, which keeps the MUTE
+> screen up after GLO is let go, so the mutes can be played with one hand ([Mutes](#mutes)). Everything else is
+> DEADACTIVE's Hortator as released in 0.26.0.
+
 - **Play it in your browser:** <https://deadactive.github.io/hortator/>. The page runs the real firmware, compiled
   to WebAssembly, on a 3D FM-1 you can play with the mouse, a touch screen or the computer keyboard.
 - **Install it on your FM-1:** <https://deadactive.github.io/hortator/webapp/installer/>, in Chrome or Edge, over
@@ -112,6 +116,13 @@ tracks). The top C# sets `MUTE: NOW`, the top D# `MUTE: NEXT BAR` (the same sett
 BAR, a mute made while playing blinks, then lands on the next downbeat. G4 (the next white key up) turns
 [MIDI LEARN](#midi-learn) on and off. While the screen is up the keys play nothing and the knobs and the other
 buttons rest, PLAY aside. Let go of GLO: back to the page you were on.
+
+**One-handed mutes (MUTE SCREEN: LATCH).** Hold HOME for the menu and set **MUTE SCREEN** to **LATCH**. Now hold GLO
+until the MUTE screen opens (or press GLO with a key) and let go: the screen stays up, `LATCHED: NOW` or
+`LATCHED: NEXT BAR` at the bottom, and the white keys keep toggling the mutes with GLO up, so one hand plays the
+whole arrangement. Press GLO again, or OCT-, to close it (that press does nothing else: no GLOBAL page). A quick GLO
+tap still opens GLOBAL. PLAY works while it is latched; the knobs, FX and SAVE rest. **HOLD** (the default) is the
+screen as before. The setting is kept over power-off.
 
 ### MIDI LEARN
 

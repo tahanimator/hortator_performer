@@ -82,6 +82,10 @@ static struct { uint8_t set, slot; } lastp;
 enum { BL_OFF, BL_DIM_LO, BL_DIM_HI, BL_INV, BL_INV_LO, BL_INV_HI, BL_COUNT };
 static const char *const BL_NAME[BL_COUNT] = {"OFF", "DIM LO", "DIM HI", "INV", "INV LO", "INV HI"};
 static uint32_t backlight;
+/* MENU > MUTE SCREEN (fork: Meat Proxy): 0 HOLD (the MUTE screen while GLO is held, as before), 1 LATCH (GLO held, then
+ * let go: the screen stays up and the white keys toggle the mutes with GLO up; GLO or OCT- again closes it; seq.c
+ * mute_latched, ui_input.c glo_input). As btset: only from the flash record (the palette word's bit 15), else HOLD */
+static uint32_t mutelatch;
 /* MENU > USB AUDIO: 0 2 CH (the master, as before), 1 10 CH (the master + T1..T8; usb_app8.c). As btset: only from the
  * flash record (the palette word's bit 12; older records: 2 CH), else 2 CH. What the host sees is usb10 (fx.c): set
  * at power-on (ui.c drum_boot_init; SAFE START: 2 CH) and by the reconnect when the menu closes (ui_menu.c) */

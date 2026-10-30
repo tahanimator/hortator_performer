@@ -1,0 +1,51 @@
+# Fork (Meat Proxy): build the installable packages on GitHub, so no local JieLi toolchain is needed.
+# Run it from the Actions tab (Run workflow) or by pushing; the .fwsc files are the run's artifacts.
+name: build firmware
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: standard
+            ble: "0"
+          - name: bluetooth
+            ble: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python with Pillow
+        run: pip3 install --break-system-packages Pillow || pip3 install Pillow
+
+      - name: JieLi toolchain (cached)
+        id: tc
+        uses: actions/cache@v4
+        with:
+          path: ~/.jieli/toolchain
+          key: jieli-toolchain-v1
+
+      - name: Fetch the JieLi toolchain
+        if: steps.tc.outputs.cache-hit != 'true'
+        run: sh tools/get_toolchain.sh
+
+      - name: JieLi AC79 SDK (the three files the package needs)
+        run: |
+          git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
+            https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
+
+      - name: Build (${{ matrix.name }})
+        env:
+          FELUCCA_BLE: ${{ matrix.ble }}
+        run: ./build.sh
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: hortator-mute-latch-${{ matrix.name }}
+          path: build/*.fwsc
