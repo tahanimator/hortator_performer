@@ -1,5 +1,6 @@
 # Fork (Meat Proxy): build the installable packages on GitHub, so no local JieLi toolchain is needed.
-# Run it from the Actions tab (Run workflow) or by pushing; the .fwsc files are the run's artifacts.
+# Runs on every push, or from the Actions tab (Run workflow). The run's artifact holds both packages
+# (standard and Bluetooth) and the local web installer site that DRUM_PACKAGE builds alongside them.
 name: build firmware
 
 on:
@@ -9,14 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: standard
-            ble: "0"
-          - name: bluetooth
-            ble: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -34,18 +27,25 @@ jobs:
         if: steps.tc.outputs.cache-hit != 'true'
         run: sh tools/get_toolchain.sh
 
-      - name: JieLi AC79 SDK (the three files the package needs)
+      - name: JieLi AC79 SDK
         run: |
           git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
             https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
 
-      - name: Build (${{ matrix.name }})
+      - name: Build both packages (standard + Bluetooth)
         env:
-          FELUCCA_BLE: ${{ matrix.ble }}
+          DRUM_PACKAGE: "1"       # write the installable .fwsc (the fork skips it otherwise)
+          DRUM_BUNDLE: "1"        # the Bluetooth package too, in its own run
+          JIELI_DOCKER: "1"       # the Bluetooth build runs the toolchain in Docker (the SDK mounted at /sdk)
         run: ./build.sh
 
-      - name: Upload the package
+      - name: List the outputs
+        run: ls -la build/*.fwsc
+
+      - name: Upload the packages
         uses: actions/upload-artifact@v4
         with:
-          name: hortator-mute-latch-${{ matrix.name }}
-          path: build/*.fwsc
+          name: hortator-mute-latch
+          path: |
+            build/*.fwsc
+            build/site/
