@@ -21,11 +21,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.jieli/toolchain
-          key: jieli-toolchain-v1
+          key: jieli-toolchain-v2
 
-      - name: Fetch the JieLi toolchain
-        if: steps.tc.outputs.cache-hit != 'true'
-        run: sh tools/get_toolchain.sh
+      - name: Fetch the JieLi toolchain (when the cache has no compiler)
+        run: |
+          [ -x ~/.jieli/toolchain/pi32v2/bin/clang ] || { rm -rf ~/.jieli/toolchain; sh tools/get_toolchain.sh; }
+          ls ~/.jieli/toolchain/pi32v2/bin/clang
 
       - name: JieLi AC79 SDK
         run: |
