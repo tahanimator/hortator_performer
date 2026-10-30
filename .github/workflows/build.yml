@@ -37,7 +37,13 @@ jobs:
           DRUM_PACKAGE: "1"       # write the installable .fwsc (the fork skips it otherwise)
           DRUM_BUNDLE: "1"        # the Bluetooth package too, in its own run
           JIELI_DOCKER: "1"       # the Bluetooth build runs the toolchain in Docker (the SDK mounted at /sdk)
-        run: ./build.sh
+        run: |
+          set -o pipefail
+          ./build.sh 2>&1 | tee build.log || {
+            tail -40 build.log | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"}{print}' | sed 's/^/::error title=build.sh failed::/'
+            echo
+            exit 1
+          }
 
       - name: List the outputs
         run: ls -la build/*.fwsc
