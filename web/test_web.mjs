@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
 import { logicalImage, productOf } from "./fm1pkg.js";
-import { Updater, pack7, unpack7 } from "./fm1ota.js";
+import { FM1_NAME, Updater, baseName, pack7, portPairs, unpack7 } from "./fm1ota.js";
 import { GC_CODE, counterOn, countInstall, installCount, loadPageCounter } from "./sim/counter.js";
 
 let failed = 0;
@@ -545,8 +545,9 @@ class FakeFM1 {
     this.identity = identity; this.waiting = null; this.queue = [];
     for (const m of [this.access.inputs, this.access.outputs]) { for (const p of m.values()) p.state = "disconnected"; m.clear(); }
     const id = Math.random().toString(36).slice(2);
-    this.input = { id: "i" + id, name, state: "connected", onmidimessage: null, open: async () => {} };
-    this.output = { id: "o" + id, name, state: "connected", open: async () => {}, send: (d) => {
+    const [inName, outName] = Array.isArray(name) ? name : [name, name];   // (an OS may name the two sides apart)
+    this.input = { id: "i" + id, name: inName, state: "connected", onmidimessage: null, open: async () => {} };
+    this.output = { id: "o" + id, name: outName, state: "connected", open: async () => {}, send: (d) => {
       if (this.output.state !== "connected") throw new Error("InvalidStateError");
       setTimeout(() => this.rx(Array.from(d)), 1);
     } };
@@ -609,6 +610,29 @@ async function updater() {
     const got8 = await new Updater(dev8.access).install(image, "FM-1_901").then((r) => r, (x) => x);
     ok(got8 === "FM-1_901" && dev8.bad === 0, `fm1ota.js: install: running ${nm} (USB AUDIO 10 CH) -> loader -> ${back}`);
   }
+
+  // fork (Meat Proxy): the device list. Ports an OS names apart are paired; a port of any name the user picks is
+  // probed, and after the restart into update mode (any name) every port is asked
+  ok(baseName("MIDIIN2 (FM-1)") === "fm-1" && baseName("MIDIOUT2 (FM-1)") === "fm-1" && baseName("FM-1 Port 1") === "fm-1"
+    && baseName("Hortator") === "hortator", "fm1ota.js: baseName strips what Windows / macOS add to a port name");
+  const devW = new FakeFM1(image, { identity: "FM-1_900", name: ["MIDIIN2 (FM-1)", "MIDIOUT2 (FM-1)"], after: "FM-1_901",
+    afterName: ["MIDIIN2 (Hortator)", "MIDIOUT2 (Hortator)"] });
+  ok(portPairs(devW.access).length === 1, "fm1ota.js: portPairs pairs MIDIIN2 (FM-1) with MIDIOUT2 (FM-1)");
+  const gotW = await new Updater(devW.access).install(image, "FM-1_901").then((r) => r, (x) => x);
+  ok(gotW === "FM-1_901" && devW.bad === 0, "fm1ota.js: install: Windows port names (MIDIIN2 / MIDIOUT2) -> loader -> back");
+  const devX = new FakeFM1(image, { identity: "FM-1_900", name: "USB Audio Device", after: "FM-1_901", afterName: "Generic MIDI" });
+  ok(!FM1_NAME.test("USB Audio Device"), "(a port name the installer would not ask on its own)");
+  const eX = await new Updater(devX.access).install(image, "FM-1_901").then(() => null, (x) => x);
+  ok(eX && eX.code === "notfound", "fm1ota.js: an odd port name, not picked: not asked (notfound)");
+  const devY = new FakeFM1(image, { identity: "FM-1_900", name: "USB Audio Device", after: "FM-1_901", afterName: "Generic MIDI" });
+  const upY = new Updater(devY.access);
+  const [pY] = portPairs(devY.access);
+  upY.pick = { inId: pY.input.id, outId: pY.output.id };
+  upY.probeAll = true;                               // (the page sets it for a picked port of another name)
+  const gotY = await upY.install(image, "FM-1_901").then((r) => r, (x) => x);
+  ok(gotY === "FM-1_901" && devY.bad === 0, "fm1ota.js: the picked odd-named port is installed, found again under any name");
+  const idY = await new Updater(devY.access).identify(portPairs(devY.access)[0]);
+  ok(idY && idY.id.text === "FM-1_901", "fm1ota.js: identify answers a pair's identity (the page's list)");
 
   const dev2 = new FakeFM1(image, { unplugAfter: 3 });
   dev2.boot("ota-FM-1_900", "Felucca Update");

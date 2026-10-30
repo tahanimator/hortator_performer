@@ -10,6 +10,12 @@ released yet are listed under Unreleased.
   up, for one-handed mute performance. The next GLO press, or OCT-, closes it and does nothing else. A GLO tap still
   opens GLOBAL. Kept over power-off (an older Hortator reads HOLD). The menu's rows are a pixel closer to fit the
   twelfth.
+- **Installer: choose your FM-1** (fork): a new step on the web installer, *Search for MIDI devices*, lists every
+  MIDI port, asks the ones named like an FM-1 to identify themselves and marks those that answer; pick one and
+  Install uses it. Ports an OS names apart are paired (Windows' `MIDIIN2 (FM-1)` / `MIDIOUT2 (FM-1)`, `FM-1 Port 1`),
+  more firmware names are recognised, and a tick box asks every port (for an FM-1 under a name nobody expected; a
+  picked port of another name does this by itself, so the FM-1 is found again after its restart into update mode).
+  The technical log lists every MIDI port the browser sees.
 - Host tests build on Linux too (no instruction counter there; the cost checks stay macOS's).
 
 ## 0.26.0 - 2026-10-28

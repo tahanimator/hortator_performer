@@ -55,6 +55,14 @@
     box-shadow: 0 6px 18px rgba(0,0,0,.22);
   }
   #go:disabled { opacity: .35; cursor: default; box-shadow: none; }
+  .devrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 0; }
+  #scan { font: 500 15px/1 "IBM Plex Sans", system-ui, sans-serif; padding: 11px 20px; border-radius: 999px; cursor: pointer;
+          border: 2px solid var(--accent); background: transparent; color: var(--ink); }
+  #scan:disabled { opacity: .45; cursor: default; }
+  #dev { font: 400 15px/1.3 "IBM Plex Sans", system-ui, sans-serif; padding: 9px 10px; border-radius: 10px; min-width: 0;
+         flex: 1 1 260px; max-width: 100%; border: 1px solid var(--rule); background: var(--card); color: var(--ink); }
+  .allports { display: block; margin: 8px 0 0; font-size: 14px; color: var(--ink-soft); cursor: pointer; }
+  #devstatus { margin: 8px 0 0; font-size: 14px; }
   #variants { border: 0; padding: 0; margin: 10px 0 4px; }
   #variants legend { padding: 0; font-weight: 500; }
   #variants label { display: block; margin: 4px 0 0; cursor: pointer; }
@@ -90,6 +98,16 @@
   <ol class="steps">
     <li><h2>Use Chrome or Edge</h2><p data-t="intro"></p></li>
     <li><h2>Connect the FM-1</h2><p data-t="direct"></p></li>
+    <li>
+      <h2>Choose your FM-1</h2>
+      <p data-t="findp"></p>
+      <div class="devrow">
+        <button id="scan" data-t="scan"></button>
+        <select id="dev" aria-label="MIDI device" disabled><option data-t="nodev"></option></select>
+      </div>
+      <label class="allports"><input type="checkbox" id="all"> <span data-t="allports"></span></label>
+      <p id="devstatus" role="status"></p>
+    </li>
     <li>
       <h2>Install</h2>
       <p data-t="warn"></p>
@@ -148,7 +166,7 @@ const TEXT = {
     reboot: "Restarting", done: "Done. The FM-1 restarts with Hortator.", stopped: "Stopped. Replug the USB cable and press Install again.",
     error: "Error: ",
     denied: "MIDI (SysEx) access was not allowed. Allow MIDI in the site settings (address bar) and press Install again.",
-    notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps that use MIDI, and press Install again.",
+    notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps that use MIDI, then Search again (step 3), pick it in the list, and press Install.",
     model: "The connected device is not an FM-1.",
     lost: "The USB connection was lost. Replug it and press Install again.",
     noloader: "The FM-1 in update mode was not found. Replug the USB cable and press Install again (it stays in update mode until it is finished).",
@@ -158,6 +176,13 @@ const TEXT = {
     leave: "Writing. Do not close the page.",
     license: "GPL-3.0, no warranty.",
     which: "Version",
+    findp: "Search for MIDI devices, then pick the FM-1. The list asks every port that looks like an FM-1 to identify itself; the ones that answer are marked.",
+    scan: "Search for MIDI devices", nodev: "No device yet: press Search",
+    allports: "Ask every MIDI port, not only the ones named like an FM-1 (use this if your FM-1 does not show up)",
+    scanning: "Searching…", found: "FM-1 found: ", foundn: " FM-1s found: pick one.",
+    nofm1: "No FM-1 answered. Pick its port from the list anyway, or tick the box above and search again.",
+    noports: "No MIDI devices at all. Check the cable (a data cable, no hub), close other apps that use MIDI, and search again.",
+    answers: "answers as ", silent: "did not answer", unasked: "not asked",
     v_std: "Hortator",
     v_ble: "Hortator + Bluetooth MIDI (experimental)",
     v_ble_note: "The same Hortator with Bluetooth MIDI added: MENU (hold HOME) > BLUETOOTH connects a BLE-MIDI keyboard or the M-VAVE SMC-Mixer (DAW mode: faders, knobs, mute, solo, record, transport). Bluetooth is off at every power-on until you turn it on there.",
@@ -179,6 +204,59 @@ let image = null;
 const meta = /*META*/;
 
 let writing = false;
+let midi = null, pairs = [];
+const pairLabel = (p) => p.input.name === p.output.name ? p.input.name : `${p.input.name} / ${p.output.name}`;
+async function getMidi() {
+  if (midi) return midi;
+  midi = await navigator.requestMIDIAccess({ sysex: true });
+  midi.onstatechange = () => { if (!writing && !scanning) listPorts(); };   // plugged / unplugged: the list follows
+  return midi;
+}
+function listPorts(ids = new Map()) {               // the select: answering FM-1s first, then every other pair
+  const prev = $("dev").value;
+  pairs = portPairs(midi);
+  const sel = $("dev");
+  sel.innerHTML = "";
+  const ordered = [...pairs].sort((a, b) => (ids.get(b.input.id) ? 1 : 0) - (ids.get(a.input.id) ? 1 : 0));
+  for (const p of ordered) {
+    const o = document.createElement("option");
+    o.value = p.input.id + "|" + p.output.id;
+    const id = ids.get(p.input.id);
+    o.textContent = id ? `FM-1 — ${id.text} (${pairLabel(p)})`
+      : `${pairLabel(p)} — ${ids.has(p.input.id) ? t("silent") : t("unasked")}`;
+    sel.appendChild(o);
+  }
+  if (!pairs.length) { const o = document.createElement("option"); o.textContent = t("nodev"); sel.appendChild(o); }
+  sel.disabled = !pairs.length || writing;
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+}
+let scanning = false;
+async function scan() {
+  if (writing || scanning) return;
+  try { await getMidi(); } catch (e) { sayK("denied"); return; }
+  scanning = true;
+  $("scan").disabled = true;
+  $("devstatus").textContent = t("scanning");
+  const up = new Updater(midi, log);
+  up.probeAll = $("all").checked;
+  const all = portPairs(midi);
+  log("MIDI inputs: " + [...midi.inputs.values()].map((p) => `"${p.name}" (${p.state})`).join(", "));
+  log("MIDI outputs: " + [...midi.outputs.values()].map((p) => `"${p.name}" (${p.state})`).join(", "));
+  const ids = new Map();
+  for (const p of up.candidates()) {
+    const dev = await up.identify(p);
+    ids.set(p.input.id, dev ? dev.id : null);
+    log(`probe "${pairLabel(p)}": ${dev ? t("answers") + dev.id.text : t("silent")}`);
+  }
+  listPorts(ids);
+  const n = [...ids.values()].filter(Boolean).length;
+  $("devstatus").textContent = !all.length ? t("noports")
+    : n === 1 ? t("found") + [...ids.values()].find(Boolean).text
+    : n > 1 ? n + t("foundn") : t("nofm1");
+  scanning = false;
+  $("scan").disabled = false;
+}
+$("scan").addEventListener("click", scan);
 window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = t("leave"); } });
 
 const load = async () => {
@@ -211,12 +289,21 @@ document.querySelectorAll('input[name="variant"]').forEach((r) => r.addEventList
 
 $("go").addEventListener("click", async () => {
   $("go").disabled = true;
-  let midi;
-  try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+  try { await getMidi(); }
   catch (e) { sayK("denied"); $("go").disabled = false; return; }
   writing = true;
+  $("scan").disabled = $("dev").disabled = true;
   try {
     const up = new Updater(midi, log);
+    up.probeAll = $("all").checked;
+    const [inId, outId] = ($("dev").value || "").split("|");
+    const picked = pairs.find((p) => p.input.id === inId && p.output.id === outId);
+    if (picked) {
+      up.pick = { inId, outId };
+      // a port named otherwise: after the restart into update mode its name may be anything, so ask every port
+      if (!FM1_NAME.test(picked.input.name || "") && !FM1_NAME.test(picked.output.name || "")) up.probeAll = true;
+      log(`device: "${pairLabel(picked)}"${up.probeAll ? " (asking every port)" : ""}`);
+    }
     const total = 74 + 1167;
     const step = (k, a) => {
       log(`${k} ${a ?? ""}`);
@@ -241,6 +328,8 @@ $("go").addEventListener("click", async () => {
   }
   writing = false;
   $("go").disabled = false;
+  $("scan").disabled = false;
+  if (midi) listPorts();
 });
 </script>
 </body>

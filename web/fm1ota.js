@@ -108,25 +108,68 @@ async function handshake(link, tries = 3) {
   return null;
 }
 
+// port names an FM-1 shows: its firmware's own (stock FM-1, Felucca, Hortator and the other community firmwares,
+// "Felucca Update" in update mode) or a generic USB-MIDI name, as an OS may give it
+export const FM1_NAME = /fm-?1|m-?vave|hortator|felucca|ota|composite|sinco|usb-midi|usb midi|sloop|skiff|melodee|ctl-1|clipper/i;
+
+// a port name without what Windows / macOS / a hub add around it: "MIDIIN2 (FM-1)" -> "fm-1", "FM-1 Port 1" -> "fm-1"
+export function baseName(n) {
+  return String(n || "")
+    .replace(/^\s*midi(in|out)\d*\s*\((.*)\)\s*$/i, "$2")
+    .replace(/\s+(in|out|input|output)$/i, "")
+    .replace(/\s+(port|midi)\s*\d*$/i, "")
+    .replace(/\s+\d+$/, "")
+    .trim().toLowerCase();
+}
+
+// each live input with its output: the same name, else the same name once decorations are stripped
+export function portPairs(access) {
+  const outs = [...access.outputs.values()].filter((o) => o.state !== "disconnected");
+  const pairs = [];
+  for (const input of access.inputs.values()) {
+    if (input.state === "disconnected") continue;
+    const output = outs.find((o) => o.name === input.name) || outs.find((o) => baseName(o.name) === baseName(input.name));
+    if (output) pairs.push({ input, output, name: input.name });
+  }
+  return pairs;
+}
+
 export class Updater {
   constructor(access, log) {
     this.access = access;
     this.log = log || (() => {});
+    this.pick = null;        // { inId, outId }: the pair the user chose on the page, probed first
+    this.probeAll = false;   // probe every MIDI port pair, not only FM-1-looking names
   }
 
-  // every in/out pair with the same port name that answers the handshake
+  // the in/out pairs to probe: the one the user picked first (the page's device list), then every pair whose
+  // name looks like an FM-1 (or every pair at all, probeAll: the user asked, or picked a port of another name)
+  candidates() {
+    const all = portPairs(this.access);
+    let list = this.probeAll ? all : all.filter((p) => FM1_NAME.test(p.input.name || "") || FM1_NAME.test(p.output.name || ""));
+    if (this.pick) {
+      const input = [...this.access.inputs.values()].find((i) => i.id === this.pick.inId && i.state !== "disconnected");
+      const output = [...this.access.outputs.values()].find((o) => o.id === this.pick.outId && o.state !== "disconnected");
+      if (input && output) list = [{ input, output, name: input.name }, ...list.filter((p) => p.input !== input)];
+    }
+    return list;
+  }
+
+  // the identity a pair answers with (null: no answer); leaves the link open when keep
+  async identify(pair, keep = false) {
+    try { await pair.input.open(); await pair.output.open(); } catch (_) { return null; }
+    const link = new Link(pair.input, pair.output);
+    const id = await handshake(link, 2);
+    if (!keep || !id) link.close();
+    return id ? { link, id, name: pair.input.name } : null;
+  }
+
+  // every candidate pair that answers the handshake (and passes filter)
   async find(filter) {
-    const outs = [...this.access.outputs.values()];
-    for (const input of this.access.inputs.values()) {
-      if (input.state === "disconnected") continue;
-      if (!/fm-1|hortator|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
-      const output = outs.find((o) => o.name === input.name && o.state !== "disconnected");
-      if (!output) continue;
-      try { await input.open(); await output.open(); } catch (_) { continue; }
-      const link = new Link(input, output);
-      const id = await handshake(link, 2);
-      if (id && (!filter || filter(id))) return { link, id, name: input.name };
-      link.close();
+    for (const pair of this.candidates()) {
+      const dev = await this.identify(pair, true);
+      if (dev && (!filter || filter(dev.id))) return dev;
+      if (dev) dev.link.close();
     }
     return null;
   }
