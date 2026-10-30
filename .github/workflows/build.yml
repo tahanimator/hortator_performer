@@ -33,11 +33,20 @@ jobs:
           git clone --depth 1 --branch AC79NN_SDK_V1.2.1_2023-12-13 \
             https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git ~/fw-AC79_AIoT_SDK
 
+      - name: JieLi AC79 SDK V1.2.0 (the Bluetooth libraries the BLE build links, pinned by sha256)
+        run: |
+          for u in https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git https://github.com/Jieli-Tech/fw-AC79_AIoT_SDK.git; do
+            git clone --depth 1 --branch AC79NN_SDK_V1.2.0 "$u" ~/ac79-bt-sdk && break
+            rm -rf ~/ac79-bt-sdk
+          done
+          ls ~/ac79-bt-sdk/cpu/wl82/liba/btctrler.a
+
       - name: Build both packages (standard + Bluetooth)
         env:
           DRUM_PACKAGE: "1"       # write the installable .fwsc (the fork skips it otherwise)
           DRUM_BUNDLE: "1"        # the Bluetooth package too, in its own run
           JIELI_DOCKER: "1"       # the Bluetooth build runs the toolchain in Docker (the SDK mounted at /sdk)
+          AC79_BT_SDK: /home/runner/ac79-bt-sdk
         run: |
           set -o pipefail
           ./build.sh 2>&1 | tee build.log || {
