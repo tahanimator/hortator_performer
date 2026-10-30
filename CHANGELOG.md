@@ -10,6 +10,10 @@ released yet are listed under Unreleased.
   up, for one-handed mute performance. The next GLO press, or OCT-, closes it and does nothing else. A GLO tap still
   opens GLOBAL. Kept over power-off (an older Hortator reads HOLD). The menu's rows are a pixel closer to fit the
   twelfth.
+- **Fixed (LATCH): PLAY stopped working.** On the latched MUTE screen G4, the white key next to track 8's F4, still
+  turned MIDI LEARN on with GLO up; a brush left LEARN on, and with LEARN on PLAY is picked as a learn target
+  instead of starting or stopping. Latched, G4 now does nothing (the screen says `G4 LEARN: HOLD GLO`); GLO held +
+  G4 turns MIDI LEARN on and off as before.
 - **Installer: choose your FM-1** (fork): a new step on the web installer, *Search for MIDI devices*, lists every
   MIDI port, asks the ones named like an FM-1 to identify themselves and marks those that answer; pick one and
   Install uses it. Ports an OS names apart are paired (Windows' `MIDIIN2 (FM-1)` / `MIDIOUT2 (FM-1)`, `FM-1 Port 1`),

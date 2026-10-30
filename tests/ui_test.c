@@ -1764,6 +1764,56 @@ static void test_mute_latch(void)
     settings.mutebar = 0;
 }
 
+/* (bug report 2026-10-30) playing, MENU > MUTE SCREEN LATCH, latch, toggle, then PLAY / STOP: PLAY stopped
+ * working. Cause: G4 (next to track 8's F4) toggled MIDI LEARN with GLO up, and with LEARN on PLAY is picked as its
+ * target instead of playing. Latched, G4 does nothing; GLO held + G4 still toggles LEARN */
+static void test_mute_latch_play(void)
+{
+    uint32_t k;
+    ui_host_init();
+    settings.mutebar = 0;
+    kit_session();
+    transport_req = 1;
+    seq_play_to(0, 2);
+    hold(B_HOME);                                    /* the menu, while playing */
+    for (k = 0; k < MI_MUTE; k++) { turn(EN_SELECT, 1); ui_frame(); }
+    tap(B_OCTUP);
+    check("(bug) menu while playing: MUTE SCREEN set to LATCH", ui.menu && ui.menu_sel == MI_MUTE && mutelatch == 1u && song.playing);
+    hold(B_HOME);
+    press(B_GLO);
+    glo_hold_frames(450);
+    release_all();
+    ui_frame();
+    latch_key_tap(KEY_TRK_KEY[1]);
+    latch_key_tap(KEY_TRK_KEY[1]);
+    check("(bug) latched while playing, track 2 toggled twice", mute_latched && song.playing && trk[1].p[P_MUTE] == 0);
+    latch_key_tap(KEY_LEARN);                        /* G4 brushed */
+    check("(bug) latched: G4 brushed leaves MIDI LEARN off", !ui.ml.on && mute_latched);
+    snap_page("fixes/mute_latched_g4");
+    tap(B_PLAY);
+    for (k = 0; k < 20u; k++) ui_frame();
+    check("(bug) latched: PLAY stops", !song.playing);
+    tap(B_PLAY);
+    for (k = 0; k < 20u; k++) ui_frame();
+    check("(bug) latched: PLAY starts again", song.playing);
+    tap(B_OCTDN);
+    tap(B_PLAY);
+    for (k = 0; k < 20u; k++) ui_frame();
+    check("(bug) unlatched: PLAY stops", !song.playing);
+    press(B_GLO);                                    /* GLO held + G4: LEARN as before */
+    glo_hold_frames(450);
+    glo_key(KEY_LEARN);
+    check("(bug) GLO held + G4 still turns MIDI LEARN on", ui.ml.on);
+    glo_key(KEY_LEARN);
+    check("(bug) .. and off", !ui.ml.on);
+    release_all();
+    ui_frame();
+    tap(B_OCTDN);                                    /* (latched again by the hold: close it) */
+    transport_req = 2;
+    ui_frame();
+    mutelatch = 0;
+}
+
 /* Review focus 1: keys with GLO never play or record; GLO let go with a key held leaves nothing stuck */
 static void test_mute_screen_keys(void)
 {
@@ -9832,6 +9882,7 @@ int main(void)
     test_mute_screen();
     test_mute_screen_keys();
     test_mute_latch();
+    test_mute_latch_play();
     test_mute_screen_refused();
     test_save_tap_opens_projects();
     test_cue_keys_no_notes();

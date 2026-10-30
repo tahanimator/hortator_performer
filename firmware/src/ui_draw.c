@@ -1873,7 +1873,7 @@ static void draw_mute(void)
     k = (uint32_t)md_text(x, 24, &MD_F3, 2, "D# NEXT BAR", C_INK);
     if (!settings.mutebar)
         cv_dither(x, 24, (int32_t)k - x, 10, C_BG);
-    str_cpy(b, ui.ml.on ? "G4 LEARN: ON" : "G4 LEARN: OFF", sizeof b);
+    str_cpy(b, ui.ml.on ? "G4 LEARN: ON" : mute_latched ? "G4 LEARN: HOLD GLO" : "G4 LEARN: OFF", sizeof b);
     x = (240 - md_text_w(&MD_F3, 2, b)) / 2;
     md_text(x, 44, &MD_F3, 2, b, C_INK);
     if (!ui.ml.on)

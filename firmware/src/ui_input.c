@@ -777,7 +777,10 @@ static void mute_keys(uint32_t hits)                   /* the keys the ISR gave 
         mute_bar_set(0);
     if ((hits >> 22) & 1u)                             /* top D#: NEXT BAR */
         mute_bar_set(1);
-    if ((hits >> KEY_LEARN) & 1u)                      /* G4: MIDI LEARN on / off (ui_learn.c) */
+    if (((hits >> KEY_LEARN) & 1u) && (fm1_in.buttons >> panel.btn[B_GLO] & 1u))   /* G4: MIDI LEARN on / off
+                                                         * (ui_learn.c), with GLO held only: latched (LATCH), G4 sits
+                                                         * next to track 8's F4, and a brush would leave LEARN on,
+                                                         * PLAY then picked as its target instead of playing */
         ml_toggle();
 }
 static int cue_owns_keys(void);
