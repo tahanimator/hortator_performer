@@ -595,6 +595,10 @@ static void edit_param(uint32_t slot, int32_t steps)
         ui_say("CLK ", N_CLOCK[song.g[G_CLOCK]]);
         return;
     }
+    if (pg->scope == SC_GLOBAL && id == G_CLOCK && song.playing) {   /* (fork: a CLK change stops the set) */
+        ui_message("STOP TO CHANGE CLK");
+        return;
+    }
     v = knob_turn(EN_K1 + slot, d, *vp, steps);
     if (pg->scope == SC_TRACK && id == P_RMODEL && v != *vp) {   /* a capped model full: the next one (or why not) */
         int32_t dir = v > *vp ? 1 : -1;
@@ -918,8 +922,16 @@ static void glo_input(uint32_t now, uint32_t notes)
     } else if (*t0) {
         uint32_t was = *t0;
         spent = glo_eat;
-        if (!glo_eat && !(was & (GLO_OPEN | GLO_DEAD)) && !glo_dead())
-            open_family(FAM_GLO);                       /* a tap: the GLOBAL pages */
+        if (!glo_eat && !(was & (GLO_OPEN | GLO_DEAD)) && !glo_dead()) {
+            if (mutelatch && song.playing && !(was & GLO_PLAIN)) {   /* LATCH, playing: a tap latches the MUTE screen
+                                                         * (fork: no GLOBAL page, CLK on its knob 3, mid-set) */
+                ui.mute = 1;
+                ui.force = 1;
+                grid_drop_holds();
+                was |= GLO_OPEN;
+            } else
+                open_family(FAM_GLO);                   /* a tap: the GLOBAL pages */
+        }
         *t0 = 0;
         if (ui.mute) {
             if (mutelatch && (was & GLO_OPEN) && !glo_dead()) {

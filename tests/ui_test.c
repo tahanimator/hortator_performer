@@ -1800,7 +1800,27 @@ static void test_mute_latch_play(void)
     tap(B_PLAY);
     for (k = 0; k < 20u; k++) ui_frame();
     check("(bug) unlatched: PLAY stops", !song.playing);
-    press(B_GLO);                                    /* GLO held + G4: LEARN as before */
+    tap(B_PLAY);                                     /* (hotfix) LATCH, playing: a GLO tap latches, no GLOBAL page */
+    for (k = 0; k < 20u; k++) ui_frame();
+    tap(B_GLO);
+    ui_frame();
+    check("(hotfix) LATCH, playing: a GLO tap latches the MUTE screen, no GLOBAL page",
+          song.playing && ui.mute && mute_latched && cur_fam() != FAM_GLO);
+    tap(B_OCTDN);
+    mutelatch = 0;                                   /* HOLD: the tap opens GLOBAL; CLK refused while playing */
+    tap(B_GLO);
+    ui_frame();
+    {
+        int16_t clk = song.g[G_CLOCK];
+        turn(EN_K3, 3);
+        ui_frame();
+        check("(hotfix) playing: CLK refused (STOP TO CHANGE CLK), the set plays on",
+              cur_fam() == FAM_GLO && song.g[G_CLOCK] == clk && song.playing && str_eq(ui.msg, "STOP TO CHANGE CLK"));
+    }
+    mutelatch = 1;
+    tap(B_PLAY);
+    for (k = 0; k < 20u; k++) ui_frame();
+    press(B_GLO);                                  /* GLO held + G4: LEARN as before */
     glo_hold_frames(450);
     glo_key(KEY_LEARN);
     check("(bug) GLO held + G4 still turns MIDI LEARN on", ui.ml.on);
