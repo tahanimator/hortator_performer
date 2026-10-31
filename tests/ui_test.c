@@ -1814,6 +1814,289 @@ static void test_mute_latch_play(void)
     mutelatch = 0;
 }
 
+/* performer v2, phase 1: the latched MUTE screen self-contained. Black keys 1-8 queue variations (LEDs as HOME's),
+ * A4 held = a fill, KNOB 1-4 = the PERFORM macros, OCT+ held 1 s clears them, the FX LED lit while one is on */
+static void latch_frames(uint32_t n, uint32_t extra_buttons)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        fm1_in.buttons |= extra_buttons;
+        ui_frame();
+    }
+}
+static void test_latch_v2_phase1(void)
+{
+    uint32_t k, a;
+    ui_host_init();
+    settings.mutebar = 0;
+    kit_session();
+    song.rec = 0;
+    project_save(0);                                 /* (cues need a saved slot) */
+    mutelatch = 1;
+    transport_req = 1;
+    seq_play_to(0, 2);
+    press(B_GLO);
+    glo_hold_frames(450);
+    release_all();
+    ui_frame();
+    check("v2: latched while playing", mute_latched && ui.mute && song.playing);
+    latch_key_tap(CUE_BK[2]);                        /* black key 3 */
+    check("v2: latched, black key 3 queues variation 3", cue.q_var == 3u && var_cur == 0u);
+    for (k = 0; k < 6000u && var_cur != 2u; k++)
+        ui_frame();
+    check("v2: .. it comes in where the pattern ends, still latched", var_cur == 2u && !cue.q_var && mute_latched);
+    ui_frame();
+    check("v2: the playing variation's black key lit", led_lit(14u + CUE_BK[2]) && !led_lit(14u + CUE_BK[0]));
+    latch_key_tap(CUE_BK[0]);
+    latch_key_tap(CUE_BK[0]);                        /* again: at the next step */
+    for (k = 0; k < 2000u && var_cur != 0u; k++)
+        ui_frame();
+    check("v2: black key 1 twice: back to variation 1 at the next step", var_cur == 0u);
+    a = trk[0].p[P_MUTE];
+    keys(1u << KEY_FILL);                            /* A4 held (longer than a tap) */
+    latch_frames(150, 0);
+    check("v2: A4 held: a fill, no mute toggled, no note", (fill_on & FILL_KEY) && trk[0].p[P_MUTE] == (int16_t)a);
+    snap_page("fixes/latch_v2_fill");
+    keys(0);
+    latch_frames(2, 0);
+    check("v2: A4 let go after a hold: the fill ends", !fill_on);
+    turn(EN_K1, 6);
+    ui_frame();
+    turn(EN_K1 + 1, 3);
+    ui_frame();
+    check("v2: latched, KNOB 1 / 2 move FILTER / CRUSH", perf_k[0] > 0 && perf_k[1] > 0 && mute_latched);
+    ui_frame();
+    check("v2: the FX button lit while a macro is on", led_on(panel.btn[B_FX]));
+    snap_page("fixes/latch_v2_fx_on");
+    press(B_OCTUP);
+    latch_frames(120, 1u << panel.btn[B_OCTUP]);     /* (the host clock: 1 ms a read, a few reads a frame) */
+    check("v2: OCT+ held briefly: nothing yet", perf_macros_on());
+    latch_frames(600, 1u << panel.btn[B_OCTUP]);
+    release_all();
+    ui_frame();
+    check("v2: OCT+ held 1 s: the macros back to 0, FX unlit, still latched",
+          !perf_macros_on() && !led_on(panel.btn[B_FX]) && mute_latched);
+    tap(B_OCTDN);
+    turn(EN_K1, 4);                                   /* not latched, on HOME: the knob is the page's, no macro */
+    ui_frame();
+    check("v2: unlatched, KNOB 1 no macro", perf_k[0] == 0);
+    transport_req = 2;
+    ui_frame();
+    mutelatch = 0;
+    perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
+    memset(&proj_slot[0], 0, sizeof proj_slot[0]);
+}
+
+/* performer v2, phase 2: REC asks before it starts recording while playing in LATCH mode; the bar strip */
+static int strip_pip_lit(uint32_t k)                /* the bar strip's pip k filled (its centre), screen y 146.. */
+{
+    return fb[(146u + 9u) * 240u + 12u + k * 11u + 4u] == C_INK;
+}
+static void test_latch_v2_phase2(void)
+{
+    uint32_t k, lit, ok;
+    ui_host_init();
+    settings.mutebar = 0;
+    kit_session();
+    song.rec = 0;
+    mutelatch = 1;
+    transport_req = 1;
+    seq_play_to(0, 2);
+    tap(B_HOME);
+    if (mix_mode())
+        tap(B_HOME);                                 /* (HOME mode, not TRACKS: a tap there is REC ALL) */
+    tap(B_REC);
+    check("v2: LATCH, playing: a REC tap only asks", !ui.rec_all && song.rec == 0u);
+    tap(B_REC);
+    check("v2: .. a second tap starts REC ALL", ui.rec_all && song.rec != 0u);
+    tap(B_REC);
+    check("v2: .. ending it needs one tap", !ui.rec_all && song.rec == 0u);
+    transport_req = 2;
+    ui_frame();
+    tap(B_REC);
+    check("v2: stopped: one tap, as before", ui.rec_all);
+    tap(B_REC);
+    mutelatch = 0;
+    transport_req = 1;
+    seq_play_to(0, 2);
+    tap(B_REC);
+    check("v2: HOLD, playing: one tap, as before", ui.rec_all);
+    tap(B_REC);
+    mutelatch = 1;
+    press(B_GLO);
+    glo_hold_frames(450);
+    release_all();
+    ui_frame();
+    ok = 1;
+    for (k = 0; k < 3u; k++) {                       /* the lit pip follows the bar's sixteenth */
+        uint32_t i, want;
+        for (i = 0; i < 400u && bar16() == (want = bar16()); i++)
+            ui_frame();
+        ui_frame();
+        want = bar16();
+        lit = strip_pip_lit(want);
+        ok &= lit;
+        if (!lit)
+            printf("     pip %u not lit\n", want);
+    }
+    check("v2: the bar strip lights the sixteenth playing", ok);
+    snap_page("fixes/latch_v2_strip");
+    tap(B_OCTDN);
+    transport_req = 2;
+    ui_frame();
+    mutelatch = 0;
+}
+
+/* performer v2, phase 3: MUTE PTN END (F#5 latched, GLOBAL 3/3's third value) lands where the pattern ends, as a
+ * cue; NEXT BAR's bars start again at a cue's switch; A4 tapped latches a fill to the pattern's end */
+static void all_len(uint32_t len)
+{
+    uint32_t k;
+    for (k = 0; k < NTRK; k++)
+        trk[k].p[P_SLEN] = (int16_t)len;
+}
+static void test_latch_v2_phase3(void)
+{
+    uint32_t k, ok;
+    ui_host_init();
+    settings.mutebar = 1;
+    kit_session();
+    song.rec = 0;
+    all_len(12);                                     /* a 12-step pattern: its ends are not NEXT BAR's bars */
+    project_save(0);
+    mutelatch = 1;
+    transport_req = 1;
+    seq_play_to(0, 2);
+    press(B_GLO);
+    glo_hold_frames(450);
+    release_all();
+    ui_frame();
+    latch_key_tap(KEY_PTN);
+    check("v2: latched, top F# = PTN END (setting, LED, GLOBAL knob value)",
+          settings.mutebar == 2u && led_lit(14u + KEY_PTN) && !led_lit(14u + 20u) && song.act[2] == 2);
+    snap_page("fixes/latch_v2_ptn");
+    seq_play_to(0, 3);
+    latch_key_tap(KEY_TRK_KEY[1]);
+    check("v2: PTN END: a mute waits", (song.mute_q & 2u) && trk[1].p[P_MUTE] == 0);
+    ok = 1;
+    for (k = 0; k < 4000u && song.mute_q; k++) {
+        ui_frame();
+        if (song.mute_q == 0u && trk[0].seq_idx > 1u)
+            ok = 0;                                  /* it landed somewhere other than the pattern's start */
+    }
+    check("v2: PTN END: it lands as the 12-step pattern starts again", trk[1].p[P_MUTE] == 1 && ok &&
+          trk[0].seq_idx <= 1u);
+    latch_key_tap(KEY_TRK_KEY[1]);
+    for (k = 0; k < 4000u && song.mute_q; k++)
+        ui_frame();
+    latch_key_tap(21u - 1u);                         /* (C#5 is key 20) */
+    check("v2: top C#: NOW again", settings.mutebar == 0u);
+    latch_key_tap(22u);
+    check("v2: top D#: NEXT BAR", settings.mutebar == 1u);
+    /* NEXT BAR after a cue: the bars start again with the new pattern */
+    latch_key_tap(CUE_BK[1]);                        /* variation 2 (a copy) */
+    for (k = 0; k < 4000u && var_cur != 1u; k++)
+        ui_frame();
+    all_len(16);                                     /* variation 2: 16 steps */
+    latch_key_tap(CUE_BK[0]);                        /* .. then back to variation 1 (12 steps) at its end */
+    for (k = 0; k < 4000u && var_cur != 0u; k++)
+        ui_frame();
+    for (k = 0; k < 400u && trk[0].seq_idx != 1u; k++)
+        ui_frame();
+    check("v2: after a cue the bar counts from the new pattern's step 0", var_cur == 0u && bar16() <= 1u);
+    for (k = 0; k < 4000u && trk[0].seq_idx != 11u; k++)
+        ui_frame();
+    check("v2: 12 steps on, the bar is at its 12th sixteenth, not 0", bar16() >= 10u && bar16() <= 12u);
+    /* A4 tapped: a fill to the pattern's end */
+    latch_key_tap(KEY_FILL);
+    ui_frame();                                      /* (the release reaches the UI a frame later) */
+    check("v2: A4 tapped: a latched fill", (fill_on & FILL_LATCH) != 0u);
+    snap_page("fixes/latch_v2_fill_latch");
+    for (k = 0; k < 6000u && (fill_on & FILL_LATCH); k++)
+        ui_frame();
+    check("v2: .. it ends where the pattern ends", !fill_on && trk[0].seq_idx <= 1u);
+    latch_key_tap(KEY_FILL);
+    ui_frame();
+    latch_key_tap(KEY_FILL);
+    ui_frame();
+    check("v2: A4 tapped twice: no fill", !fill_on);
+    latch_key_tap(KEY_FILL);
+    ui_frame();
+    transport_req = 2;
+    ui_frame();
+    check("v2: STOP ends a latched fill", !fill_on);
+    tap(B_OCTDN);
+    settings.mutebar = 0;
+    mutelatch = 0;
+    memset(&proj_slot[0], 0, sizeof proj_slot[0]);
+}
+
+/* performer v2, phase 4: the jam snapshot. Taken by itself at the first latch after a STOP; F5 held 1 s stores;
+ * F5 tapped recalls the mutes (and the variation) as the mode says; G5 opens every track; a second tap cancels */
+static void test_latch_v2_phase4(void)
+{
+    uint32_t k;
+    ui_host_init();
+    settings.mutebar = 1;
+    kit_session();
+    song.rec = 0;
+    for (k = 0; k < NTRK; k++)
+        trk[k].p[P_MUTE] = k >= 2u;                  /* only T1, T2 heard */
+    project_save(0);
+    mutelatch = 1;
+    jam_snap.valid = 0;
+    jam_snap.armed = 1;
+    transport_req = 1;
+    seq_play_to(0, 2);
+    press(B_GLO);
+    glo_hold_frames(450);
+    release_all();
+    ui_frame();
+    check("v2: the first latch after PLAY takes the snapshot (T1, T2 heard)", jam_snap.valid && jam_snap.mutes == 0xFCu);
+    latch_key_tap(KEY_OPEN);
+    check("v2: G5: every track open, queued (NEXT BAR)", song.mute_q == 0xFCu);
+    latch_key_tap(KEY_OPEN);
+    check("v2: G5 again before the bar: cancelled", song.mute_q == 0u);
+    latch_key_tap(KEY_OPEN);
+    for (k = 0; k < 4000u && song.mute_q; k++)
+        ui_frame();
+    check("v2: .. it lands: all open", mutes_now() == 0u);
+    latch_key_tap(KEY_TRK_KEY[7]);
+    for (k = 0; k < 4000u && song.mute_q; k++)
+        ui_frame();
+    keys(1u << KEY_SNAP);                            /* F5 held 1 s: store (T8 muted) */
+    latch_frames(450, 0);
+    keys(0);
+    latch_frames(3, 0);
+    check("v2: F5 held: SNAP STORED (T8 muted)", jam_snap.mutes == 0x80u && str_eq(ui.msg, "SNAP STORED"));
+    latch_key_tap(KEY_TRK_KEY[0]);
+    latch_key_tap(KEY_TRK_KEY[1]);
+    for (k = 0; k < 4000u && song.mute_q; k++)
+        ui_frame();
+    check("(T1, T2 muted too)", mutes_now() == 0x83u);
+    latch_key_tap(KEY_SNAP);
+    ui_frame();
+    check("v2: F5 tapped: the snapshot queued", song.mute_q == 0x03u);
+    for (k = 0; k < 4000u && song.mute_q; k++)
+        ui_frame();
+    check("v2: .. it lands: back to the snapshot", mutes_now() == 0x80u);
+    latch_key_tap(KEY_TRK_KEY[3]);                    /* NOW mode: at once */
+    for (k = 0; k < 4000u && song.mute_q; k++)
+        ui_frame();
+    latch_key_tap(20u);
+    latch_key_tap(KEY_SNAP);
+    ui_frame();
+    check("v2: NOW: F5 restores at once", mutes_now() == 0x80u && !song.mute_q);
+    tap(B_OCTDN);
+    transport_req = 2;
+    ui_frame();
+    for (k = 0; k < NTRK; k++)
+        trk[k].p[P_MUTE] = 0;
+    settings.mutebar = 0;
+    mutelatch = 0;
+    memset(&proj_slot[0], 0, sizeof proj_slot[0]);
+}
+
 /* Review focus 1: keys with GLO never play or record; GLO let go with a key held leaves nothing stuck */
 static void test_mute_screen_keys(void)
 {
@@ -2786,7 +3069,10 @@ static void test_backlight_leds(void)
             if (!trk[k].p[P_MUTE])
                 m |= 1u << KEY_TRK_KEY[k];
         m |= 1u << 20;                               /* top C#: MUTE NOW */
-        check("BACKLIGHT ON, MUTE screen: audible tracks and the mode key full, every other key 5 %",
+        m |= 1u << KEY_OPEN;                         /* G5: a track to open (performer v2) */
+        if (jam_snap.valid)
+            m |= 1u << KEY_SNAP;                     /* F5: a snapshot to go back to */
+        check("BACKLIGHT ON, MUTE screen: audible tracks, the mode key, F5 / G5 when they act full, every other key 5 %",
               ui.mute && led_level(14u + KEY_TRK_KEY[5]) == 5u && led_level(14u + KEY_TRK_KEY[0]) == 100u &&
               keys_dim_except(m));
         release_all();
@@ -9883,6 +10169,10 @@ int main(void)
     test_mute_screen_keys();
     test_mute_latch();
     test_mute_latch_play();
+    test_latch_v2_phase1();
+    test_latch_v2_phase2();
+    test_latch_v2_phase3();
+    test_latch_v2_phase4();
     test_mute_screen_refused();
     test_save_tap_opens_projects();
     test_cue_keys_no_notes();

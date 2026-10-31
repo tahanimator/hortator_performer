@@ -35,6 +35,32 @@ static struct {
 static int proj_cue_apply(void);           /* project.c: the staged state in, the outgoing one out (0, or nothing
                                             * staged: CUE_E_SAME) */
 
+/* the end of the pattern (the longest track's, as SONG rows end): the samples from this block's start to it while that
+ * track plays its last step, else PTN_NOT_YET; *best: that track. The cue's boundary, and (fork: performer v2) MUTE PTN
+ * END's and A4's latched fill's (seq.c mute_bar) */
+#define PTN_NOT_YET 0xFFFFFFFFu
+static uint32_t pattern_end_dist(uint32_t *best)
+{
+    uint32_t k, b = 0, bn = 0, bd = 1, len, cur;
+    track_t *t;
+    for (k = 0; k < NTRK; k++) {
+        uint32_t m, d;
+        m = chain_beats(&trk[k], &d);
+        if (m * bd > bn * d) {
+            b = k;
+            bn = m;
+            bd = d;
+        }
+    }
+    *best = b;
+    t = &trk[b];
+    len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
+    if (t->seq_pos >= 0x7FFFFFFFu || t->seq_idx + 1u != len)
+        return PTN_NOT_YET;
+    cur = step_samples(t, div_period((uint32_t)t->p[P_SDIV], t->seq_rem), t->seq_cnt);
+    return cur > t->seq_pos ? cur - t->seq_pos : 0u;
+}
+
 static void cue_fade_set(uint32_t g, int32_t d, uint32_t at)   /* this block's mix gain (fx.c mix_part) */
 {
     mix_fade = (int32_t)g;
@@ -64,6 +90,8 @@ static __attribute__((noinline)) int cue_switch(uint32_t x, uint32_t k)
     cue.b24 = (uint16_t)b24;
     if (song.playing) {
         seq_restart(x, cue.b24);
+        bar_org = gclk.cnt + 1u;                   /* NEXT BAR's bars (and METRO's one) from the new pattern's step 0:
+                                                    * the 1/16 that starts here (fork: performer v2) */
         chain.cut = 1;                             /* (seq_tick: the block's rest after x) */
         acid_gates_close();
     }
@@ -124,23 +152,9 @@ static __attribute__((noinline)) void cue_tick(uint32_t n, uint32_t adv, uint32_
             }
         }
     } else {                                       /* the end of the longest track's pattern */
-        uint32_t bn = 0, bd = 1, len, cur;
-        track_t *t;
-        for (k = 0; k < NTRK; k++) {
-            uint32_t m, d;
-            m = chain_beats(&trk[k], &d);
-            if (m * bd > bn * d) {
-                best = k;
-                bn = m;
-                bd = d;
-            }
-        }
-        t = &trk[best];
-        len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP);
-        if (t->seq_pos >= 0x7FFFFFFFu || t->seq_idx + 1u != len)
+        dist = pattern_end_dist(&best);
+        if (dist == PTN_NOT_YET)
             return;
-        cur = step_samples(t, div_period((uint32_t)t->p[P_SDIV], t->seq_rem), t->seq_cnt);
-        dist = cur > t->seq_pos ? cur - t->seq_pos : 0u;
         if (cue.q_slot && cue.fade != 1u && dist <= adv + lead) {
             cue.fade = 1;                          /* a slot switch: its fade starts (this block on) */
             cue.fg = (uint16_t)mix_fade;

@@ -108,7 +108,8 @@ static void settings_init(void)
         settings.usbfix = 0;                   /* USB LEVEL MASTER */
         settings.perfpage = 0;                 /* PERFORM HOLD */
     }
-    settings.mutebar &= 1u;
+    if (settings.mutebar > 2u)                 /* NOW BAR PTN (performer v2) */
+        settings.mutebar = 0;
     settings.usbfix &= 1u;                    /* .noinit: fields added after "SET3" */
     settings.perfpage &= 1u;
     if (settings.accel > 1u)

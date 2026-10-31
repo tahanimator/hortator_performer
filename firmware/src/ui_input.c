@@ -22,6 +22,9 @@ static void led_pos_init(void)
     }
 }
 
+static void fill_set(uint32_t bit, int on);
+static struct { uint8_t mutes, var, valid, armed; } jam_snap = {0, 0, 0, 1};   /* the jam snapshot (performer v2) */
+static uint8_t mutes_now(void);
 static void led_put(uint8_t *nl, uint32_t id, int on)
 {
     uint8_t q = led_pos[id];
@@ -195,7 +198,8 @@ static void ui_leds(void)
 {
     uint8_t nl[FM1_NCOL] = {0}, nb[FM1_NCOL] = {0};
     uint32_t k, fam = cur_fam(), beats = 0;           /* beats: the keys of steps 1 5 9 13 (step keys) */
-    uint32_t bk = !ui.cue_map && cue_bk_page() ? CUE_BK_MASK : 0u;   /* the black keys show the variations */
+    uint32_t bk = !ui.cue_map && (cue_bk_page() || ui.mute) ? CUE_BK_MASK : 0u;   /* the black keys show the
+                                                       * variations (and on the MUTE screen: performer v2) */
     static uint8_t ready;
     if (safe_start) {                                 /* safe start: LEDs off */
         uint32_t c0;
@@ -214,6 +218,7 @@ static void ui_leds(void)
     led_put(nl, panel.btn[B_REC], song.rec != 0u || ui.srec);
     led_put(nl, panel.btn[B_SCL], ui.keys);           /* KEYS (spec §5) */
     led_put(nl, panel.btn[B_ENV], ui.env);            /* STEPS (spec 2026-10-24) */
+    led_put(nl, panel.btn[B_FX], perf_macros_on());   /* a PERFORM macro left on (performer v2): FX lit */
     if (ui.cue_map) {                                 /* SAVE held: the cue map (project.c cue_led): white keys
                                                        * 1..4 the slots, the black keys (CUE_BK) the variations */
         uint32_t ms = fm1_ticks() / (1000u * FM1_TICKS_PER_US);
@@ -231,8 +236,11 @@ static void ui_leds(void)
         int blink = (int)((fm1_ticks() / (250u * 1000u * FM1_TICKS_PER_US)) & 1u);
         for (k = 0; k < NTRK; k++)
             led_put(nl, 14u + KEY_TRK_KEY[k], !trk[k].p[P_MUTE] ^ (((song.mute_q >> k) & 1u) && blink));
-        led_put(nl, 14u + 20u, !settings.mutebar);
-        led_put(nl, 14u + 22u, settings.mutebar);
+        led_put(nl, 14u + 20u, settings.mutebar == 0u);
+        led_put(nl, 14u + 22u, settings.mutebar == 1u);
+        led_put(nl, 14u + KEY_PTN, settings.mutebar == 2u);   /* F#5: PTN END (performer v2) */
+        led_put(nl, 14u + KEY_SNAP, jam_snap.valid);       /* F5: a snapshot to go back to */
+        led_put(nl, 14u + KEY_OPEN, mutes_now() != 0u);   /* G5: something to open */
         led_put(nl, 14u + KEY_LEARN, ui.ml.on);       /* G4: MIDI LEARN */
         led_put(nl, panel.btn[B_GLO], 1);
     } else if (name_on()) {                           /* NAME: the keys that type */
@@ -383,12 +391,15 @@ static void tracks_edit(uint32_t slot, int32_t steps)
     ml_knob(song.sel, id);                          /* (MIDI LEARN: picked) */
 }
 
-static void mute_bar_set(uint32_t on)                  /* the mutes: at once / on the next bar (device setting) */
+static const char *const MUTE_MODE_SAY[3] = {"MUTE: NOW", "MUTE: NEXT BAR", "MUTE: PTN END"};
+static void mute_bar_set(uint32_t m)                   /* the mutes: at once / on the next bar / at the pattern's end
+                                                         * (performer v2) (device setting) */
 {
-    settings.mutebar = on & 1u;
+    settings.mutebar = m < 3u ? m : 0u;
+    mute_mode = (uint8_t)settings.mutebar;
     song.act[2] = (int16_t)settings.mutebar;
     settings_save();
-    ui_message(settings.mutebar ? "MUTE: NEXT BAR" : "MUTE: NOW");
+    ui_message(MUTE_MODE_SAY[settings.mutebar]);
 }
 
 static void track_rec_toggle(uint32_t k)               /* arm / disarm track k (REC, every screen; the SMC-Mixer). It
@@ -442,6 +453,26 @@ static void rec_tap(void)                              /* a REC tap (the button,
     ui.rec_all = 1;
     song.rec = REC_ALL_MASK;                           /* (no play started) */
     ui_message("REC ALL");
+}
+
+/* MENU MUTE SCREEN LATCH (the performance setting; fork, performer v2): while the transport runs, a REC tap of the
+ * button that would START recording (arm a track on TRACKS, or REC ALL elsewhere) asks first, REC? TAP AGAIN, and only a
+ * second tap within 1.5 s does it: a stray REC in a set no longer records every key that follows. Ending REC ALL or
+ * disarming, stopped, HOLD and the SMC's REC: as before (a learned REC is a button tap: it asks too) */
+#define REC_ASK_MS 1500u
+static void rec_tap_button(uint32_t now)
+{
+    static uint32_t ask_t0;
+    int starts = !ui.rec_all && (!mix_mode() || !((song.rec >> song.sel) & 1u));
+    if (mutelatch && song.playing && starts) {
+        if (!ask_t0 || now - ask_t0 >= REC_ASK_MS * 1000u * FM1_TICKS_PER_US) {
+            ask_t0 = now | 1u;
+            ui_message("REC? TAP AGAIN");
+            return;
+        }
+    }
+    ask_t0 = 0;
+    rec_tap();
 }
 
 /* MOTION page: KNOB 1 PLAY (right ON, left OFF), KNOB 4 CLEAR (a turn right asks: "CLEAR MOTION T<n>?") */
@@ -704,6 +735,16 @@ static void perf_page_close(void)
     ui.pg_open = 0;
     perf_mask &= ~PERF_PAGE;
 }
+/* a turn of KNOB k+1 on a PERFORM macro (FILTER CRUSH THROW DEPTH): the FX layer's knobs, and the latched MUTE
+ * screen's (fork: performer v2) */
+static void perf_knob_turn(uint32_t k, int32_t s)
+{
+    int32_t v = clamp(perf_k[k] + accel(EN_K1 + k, s, 200), k ? 0 : -100, 100);
+    if (!k && perf_k[0] && (v < 0) != (perf_k[0] < 0))
+        v = 0;                                          /* FILTER: a turn across 0 stops at 0, its off point */
+    perf_k[k] = (int8_t)v;
+    ml_pick_act(ML_A_MAC + k);                          /* (MIDI LEARN: the macro picked, as a knob's parameter) */
+}
 static void fx_layer(uint32_t now, int home_tap)
 {
     uint32_t bit = 1u << panel.btn[B_FX], *t0 = &ui.fx_t0, k, show, down = (fm1_in.buttons & bit) != 0u;
@@ -731,11 +772,7 @@ static void fx_layer(uint32_t now, int home_tap)
     if (fx_knobs)                                       /* the knobs follow the screen: */
         for (k = 0; k < 4u; k++)                        /* the macros (FILTER CRUSH THROW DEPTH) while it is PERFORM's */
             if ((s = panel_enc(EN_K1 + k)) != 0) {
-                int32_t v = clamp(perf_k[k] + accel(EN_K1 + k, s, 200), k ? 0 : -100, 100);
-                if (!k && perf_k[0] && (v < 0) != (perf_k[0] < 0))
-                    v = 0;                              /* FILTER: a turn across 0 stops at 0, its off point */
-                perf_k[k] = (int8_t)v;
-                ml_pick_act(ML_A_MAC + k);              /* (MIDI LEARN: the macro picked, as a knob's parameter) */
+                perf_knob_turn(k, s);
                 if (down && !(*t0 & FX_DEAD))
                     *t0 |= FX_OPEN;                     /* (a dead hold stays dead: a held layer key's turn
                                                          * opens no map that outlives the key) */
@@ -767,6 +804,48 @@ static void fx_layer(uint32_t now, int home_tap)
 #define GLO_DEAD 4u
 #define GLO_PLAIN 8u
 static int glo_dead(void) { return ui.menu || ui.confirm || name_on() || pl_on(); }
+/* the jam snapshot (performer v2; a Digitakt's Temp Save / Reload for a mute jam): the mutes and the variation, RAM
+ * only. Taken by itself the first time the screen latches after a STOP (or at power-on), so there is always a "where I
+ * started"; F5 held 1 s stores the present one (SNAP STORED). F5 tapped: back to it; G5 tapped: every track open. Both
+ * follow the mute timing (NOW / NEXT BAR / PTN END) and a second tap before it lands cancels it */
+static uint8_t mutes_now(void)                          /* the tracks muted now, a bit each */
+{
+    uint32_t k;
+    uint8_t m = 0;
+    for (k = 0; k < NTRK; k++)
+        m |= (uint8_t)((trk[k].p[P_MUTE] != 0) << k);
+    return m;
+}
+static void snap_take(void)
+{
+    jam_snap.mutes = mutes_now();
+    jam_snap.var = var_cur;
+    jam_snap.valid = 1;
+}
+static void mutes_to(uint8_t target)                    /* every track to target's mute, as the mode says */
+{
+    uint32_t k;
+    uint8_t want = (uint8_t)(mutes_now() ^ target);
+    if (!settings.mutebar) {                            /* NOW: at once */
+        for (k = 0; k < NTRK; k++)
+            if ((want >> k) & 1u)
+                track_mute_toggle(k);
+        return;
+    }
+    fm1_irq_off();                                      /* queued: the lot together; the same again before it lands:
+                                                         * cancelled */
+    song.mute_q = song.mute_q == want ? 0u : want;
+    fm1_irq_on();
+}
+static void snap_recall(void)
+{
+    if (!jam_snap.valid)
+        return;
+    mutes_to(jam_snap.mutes);
+    if (jam_snap.var != var_cur && cue.q_var != jam_snap.var + 1u && proj_loaded() >= 0)
+        (void)cue_var(jam_snap.var);                        /* (its variation, where the pattern ends) */
+    ui_message("SNAP");
+}
 static void mute_keys(uint32_t hits)                   /* the keys the ISR gave the MUTE screen */
 {
     uint32_t k;
@@ -777,6 +856,16 @@ static void mute_keys(uint32_t hits)                   /* the keys the ISR gave 
         mute_bar_set(0);
     if ((hits >> 22) & 1u)                             /* top D#: NEXT BAR */
         mute_bar_set(1);
+    if ((hits >> KEY_PTN) & 1u)                        /* top F#: PTN END (performer v2) */
+        mute_bar_set(2);
+    if ((hits >> KEY_OPEN) & 1u) {                     /* G5: every track open (performer v2) */
+        mutes_to(0);
+        ui_message("ALL OPEN");
+    }
+    for (k = 0; k < 8u; k++)                           /* the first 8 black keys: variations 1..8, as on HOME (fork:
+                                                         * performer v2; project.c cue_var: again = next step) */
+        if ((hits >> CUE_BK[k]) & 1u)
+            (void)cue_var(k);
     if (((hits >> KEY_LEARN) & 1u) && (fm1_in.buttons >> panel.btn[B_GLO] & 1u))   /* G4: MIDI LEARN on / off
                                                          * (ui_learn.c), with GLO held only: latched (LATCH), G4 sits
                                                          * next to track 8's F4, and a brush would leave LEARN on,
@@ -836,6 +925,10 @@ static void glo_input(uint32_t now, uint32_t notes)
             if (mutelatch && (was & GLO_OPEN) && !glo_dead()) {
                 mute_latched = 1;                       /* LATCH: the screen stays, the keys stay its own */
                 ui_message("MUTES LATCHED");
+                if (jam_snap.armed || !jam_snap.valid) {        /* the first latch after a STOP: the snapshot, by itself */
+                    snap_take();
+                    jam_snap.armed = 0;
+                }
             } else {
                 ui.mute = 0;                            /* let go: the screen before */
                 ui.force = 1;
@@ -846,6 +939,40 @@ static void glo_input(uint32_t now, uint32_t notes)
         spent = 0;
     if (hits && !glo_dead() && !spent)                 /* (keys struck with the closing GLO: nothing) */
         mute_keys(hits);
+    {                                                   /* A4 on the MUTE screen (performer v2): held, a fill while
+                                                         * held; tapped (let go within 250 ms), a fill to the pattern's
+                                                         * end (seq.c mute_bar), tapped again before: none */
+        static uint32_t a4_t0;
+        int a4 = ui.mute && !spent && ((kb_mute >> KEY_FILL) & 1u);
+        if (a4 && !a4_t0)
+            a4_t0 = now | 1u;
+        if (!a4 && a4_t0) {
+            if (ui.mute && now - (a4_t0 & ~1u) < 250u * 1000u * FM1_TICKS_PER_US)
+                fill_set(FILL_LATCH, !(fill_on & FILL_LATCH));
+            a4_t0 = 0;
+        }
+        if (a4 != ((fill_on & FILL_KEY) != 0u))
+            fill_set(FILL_KEY, a4);
+    }
+    {                                                   /* F5 (performer v2): tapped, the snapshot back; held 1 s, the
+                                                         * present one stored */
+        static uint32_t f5_t0;
+        int f5 = ui.mute && !spent && ((kb_mute >> KEY_SNAP) & 1u);
+        if (f5 && !f5_t0)
+            f5_t0 = now | 1u;
+        if (f5 && !(f5_t0 & 2u) && now - (f5_t0 & ~3u) >= 1000u * 1000u * FM1_TICKS_PER_US) {
+            f5_t0 |= 2u;
+            snap_take();
+            ui_message("SNAP STORED");
+        }
+        if (!f5 && f5_t0) {
+            if (ui.mute && !(f5_t0 & 2u))
+                snap_recall();
+            f5_t0 = 0;
+        }
+    }
+    if (!song.playing)
+        jam_snap.armed = 1;                                 /* (the next latch takes the snapshot by itself) */
     mute_mask = (mute_mask & ~bit) |                   /* (SAVE's bit: cue_input's) */
                 ((*t0 & GLO_OPEN) || (!(*t0 & (GLO_DEAD | GLO_PLAIN)) && !glo_dead() && !ui.layer && !ui.fx_t0) ? bit
                                                                                                                 : 0u);
@@ -862,17 +989,25 @@ static void glo_input(uint32_t now, uint32_t notes)
  * release then is no tap (rec_t0's bit 1: btn_hold). A shorter press is the tap, on the release, as before. Not in the
  * menu, a confirm, NAME, the PRESETS list, the MUTE screen or MIDI LEARN. A learned REC and the SMC's REC are taps */
 #define FILL_HOLD_MS 400u
+static void fill_set(uint32_t bit, int on)             /* one source of the fill (seq.c FILL_*), the others kept: the ISR
+                                                         * clears FILL_LATCH, so the main loop's change is IRQ-safe */
+{
+    fm1_irq_off();
+    fill_on = (uint8_t)(on ? fill_on | bit : fill_on & ~bit);
+    fm1_irq_on();
+}
 static void rec_fill(uint32_t now)
 {
     int held = (fm1_in.buttons >> panel.btn[B_REC]) & 1u;
     if (!held) {
-        fill_on = 0;
+        if (fill_on & FILL_REC)
+            fill_set(FILL_REC, 0);
         return;
     }
-    if (!fill_on && ui.rec_t0 && !(ui.rec_t0 & 2u) && cur_fam() != FAM_SEQ && !ui.menu && !ui.confirm &&
+    if (!(fill_on & FILL_REC) && ui.rec_t0 && !(ui.rec_t0 & 2u) && cur_fam() != FAM_SEQ && !ui.menu && !ui.confirm &&
         !name_on() && !pl_on() && !ui.mute && !ui.ml.on &&
         now - (ui.rec_t0 & ~3u) >= FILL_HOLD_MS * 1000u * FM1_TICKS_PER_US) {
-        fill_on = 1;
+        fill_set(FILL_REC, 1);
         ui.rec_t0 |= 2u;                                /* (no tap on the release) */
     }
 }
@@ -1149,6 +1284,7 @@ static void ui_input(void)
     int32_t s, dt;
     if (safe_start)                                     /* safe start: no pages, no edits */
         return;
+    mute_mode = (uint8_t)settings.mutebar;              /* (seq.c mute_bar: the setting, as the ISR reads it) */
 #if USB8_OK
     usb_mode_service();                                 /* MENU > USB AUDIO: the reconnect, once the menu closed */
 #endif
@@ -1197,6 +1333,22 @@ static void ui_input(void)
             ui.home_t0 |= 2u;
         if (ui.rec_t0)
             ui.rec_t0 |= 2u;
+        if (mute_latched) {                             /* latched (performer v2): KNOB 1-4 the PERFORM macros, OCT+
+                                                         * held 1 s all four back to 0 */
+            static uint32_t oct_t0;
+            for (k = 0; k < 4u; k++)
+                if ((s = panel_enc(EN_K1 + k)) != 0)
+                    perf_knob_turn(k, s);
+            if ((pressed >> panel.btn[B_OCTUP]) & 1u)
+                oct_t0 = now | 1u;
+            if (!((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u))
+                oct_t0 = 0;
+            else if (oct_t0 && !(oct_t0 & 2u) && now - (oct_t0 & ~3u) >= 1000u * 1000u * FM1_TICKS_PER_US) {
+                oct_t0 |= 2u;
+                perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
+                ui_message("FX CLEARED");
+            }
+        }
         enc_drop();
         return;
     }
@@ -1246,7 +1398,8 @@ static void ui_input(void)
         } else if (srec_ok()) {
             srec_start();                               /* KEYS, STEP, stopped: step record */
         } else if (!song_lock()) {
-            rec_tap();                                  /* TRACKS: the selected track armed / disarmed; else REC ALL */
+            rec_tap_button(now);                        /* TRACKS: the selected track armed / disarmed; else REC ALL
+                                                         * (LATCH, playing: asks first) */
         }
     }
     if (ui.confirm) {                                   /* OCT- cancels (NO), OCT+ clears (YES); nothing else reacts */

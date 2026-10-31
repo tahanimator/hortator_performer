@@ -1806,11 +1806,55 @@ static void graph_perf(void)
 /* filled = audible, outline = muted, a mute waiting for the bar blinks (250 ms, amber); in each the track and its
  * model, under it the key that toggles it; below, the mode and its keys, and G4's MIDI LEARN. The top bar as
  * everywhere */
+/* the latched MUTE screen's bar strip (performer v2), y 146..163 under the boxes: 16 pips, the sixteenth playing
+ * lit (the bar NEXT BAR counts), and at the right the longest track's bar of its pattern, "2/4"; redrawn only when
+ * one of them changes (force: after the ground was filled) */
+static void draw_mute_strip(int force)
+{
+    static uint32_t ssig = 0xFFFFFFFFu;
+    uint32_t k, best = 0, bn = 0, bd = 1, pip = song.playing ? bar16() : 99u, bar = 0, bars = 1, sig;
+    char b[8];
+    for (k = 0; k < NTRK; k++) {                      /* the longest track (its pattern ends the others': cue.c) */
+        uint32_t d, n = chain_beats(&trk[k], &d);
+        if (n * bd > bn * d) {
+            best = k;
+            bn = n;
+            bd = d;
+        }
+    }
+    {
+        uint32_t len = (uint32_t)clamp(trk[best].p[P_SLEN], 1, NSTEP);
+        bars = (len + 15u) / 16u;
+        bar = song.playing ? (uint32_t)(trk[best].seq_idx % len) / 16u : 0u;
+    }
+    sig = pip * 7u + bar * 131u + bars * 977u + (uint32_t)mute_latched * 7919u;
+    if (!force && sig == ssig)
+        return;
+    ssig = sig;
+    cv_begin_at(240, 18, 146, C_BG);
+    cv_oy = 0;
+    cv_rect(0, 0, 1, 18, C_INK);
+    cv_rect(239, 0, 1, 18, C_INK);
+    for (k = 0; k < 16u; k++) {                       /* every 4th pip taller: the beats */
+        int32_t x = 12 + (int32_t)k * 11, h = (k & 3u) ? 6 : 10;
+        if (k == pip)
+            cv_rect(x, 9 - h / 2, 8, h, C_INK);
+        else
+            cv_frame(x, 9 - h / 2, 8, h, C_INK);
+    }
+    b[0] = (char)('1' + (bar < 8u ? bar : 8u));
+    b[1] = '/';
+    b[2] = (char)('0' + bars);
+    b[3] = 0;
+    md_text(228 - md_text_w(&MD_F3, 2, b), 4, &MD_F3, 2, b, C_INK);
+    cv_blit(0, 146);
+}
 static void draw_mute(void)
 {
     uint32_t k, blink = (fm1_ticks() / (250u * 1000u * FM1_TICKS_PER_US)) & 1u;
     uint32_t sig = settings.mutebar * 7u + song.mute_q * 977u + (song.mute_q ? blink + 1u : 0u) * 131u + ui.ml.on * 5003u +
-                   mute_latched * 40009u;
+                   mute_latched * 40009u + var_cur * 7919u + cue.q_var * 104729u + fill_on * 1299709u +
+                   (uint32_t)perf_macros_on() * 15485863u;
     int32_t x, w;
     char b[24];
     for (k = 0; k < NTRK; k++)
@@ -1829,6 +1873,7 @@ static void draw_mute(void)
         ui.msg_t--;
     if (ui.bpm_t)
         ui.bpm_t--;
+    draw_mute_strip(ui.force);                        /* (before the early return: it has its own signature) */
     if (!ui.force && sig == ui.graph_sig)
         return;
     ui.graph_sig = sig;
@@ -1860,24 +1905,56 @@ static void draw_mute(void)
                                                        * when not chosen), "G4 LEARN: OFF" / "ON" (MIDI LEARN) */
     cv_rect(0, 0, 1, 62, C_INK);
     cv_rect(239, 0, 1, 62, C_INK);
-    str_cpy(b, mute_latched ? (settings.mutebar ? "LATCHED: NEXT BAR" : "LATCHED: NOW")   /* (MENU MUTE SCREEN LATCH:
-                                                       * GLO or OCT- closes it) */
-                            : settings.mutebar ? "MUTE: NEXT BAR" : "MUTE: NOW", sizeof b);
-    md_text((240 - md_text_w(&MD_F3, 2, b)) / 2, 4, &MD_F3, 2, b, C_INK);
-    w = md_text_w(&MD_F3, 2, "C# NOW  D# NEXT BAR");
-    x = (240 - w) / 2;
-    k = (uint32_t)md_text(x, 24, &MD_F3, 2, "C# NOW", C_INK);
-    if (settings.mutebar)
-        cv_dither(x, 24, (int32_t)k - x, 10, C_BG);
-    x = (int32_t)k + 12;
-    k = (uint32_t)md_text(x, 24, &MD_F3, 2, "D# NEXT BAR", C_INK);
-    if (!settings.mutebar)
-        cv_dither(x, 24, (int32_t)k - x, 10, C_BG);
-    str_cpy(b, ui.ml.on ? "G4 LEARN: ON" : mute_latched ? "G4 LEARN: HOLD GLO" : "G4 LEARN: OFF", sizeof b);
-    x = (240 - md_text_w(&MD_F3, 2, b)) / 2;
-    md_text(x, 44, &MD_F3, 2, b, C_INK);
-    if (!ui.ml.on)
-        cv_dither(x, 44, md_text_w(&MD_F3, 2, b), 10, C_BG);
+    {                                                 /* the mode: NOW / NEXT BAR / PTN END (performer v2) */
+        static const char *const T_L[3] = {"LATCHED: NOW", "LATCHED: NEXT BAR", "LATCHED: PTN END"};
+        static const char *const T_H[3] = {"MUTE: NOW", "MUTE: NEXT BAR", "MUTE: PTN END"};
+        static const char *const OPT[3] = {"C# NOW", "D# BAR", "F# PTN"};
+        uint32_t m = settings.mutebar < 3u ? settings.mutebar : 0u, j;
+        str_cpy(b, mute_latched ? T_L[m] : T_H[m], sizeof b);   /* (LATCH: GLO or OCT- closes it) */
+        md_text((240 - md_text_w(&MD_F3, 2, b)) / 2, 4, &MD_F3, 2, b, C_INK);
+        w = md_text_w(&MD_F3, 2, "C# NOW D# BAR F# PTN");
+        x = (240 - w) / 2;
+        for (j = 0; j < 3u; j++) {                    /* the modes not chosen dithered */
+            k = (uint32_t)md_text(x, 24, &MD_F3, 2, OPT[j], C_INK);
+            if (j != m)
+                cv_dither(x, 24, (int32_t)k - x, 10, C_BG);
+            x = (int32_t)k + md_text_w(&MD_F3, 2, " ");
+        }
+    }
+    if (mute_latched && !ui.ml.on) {                  /* latched (performer v2): the variation (V3, V3>V5 queued),
+                                                       * a fill, the PERFORM macros left on */
+        uint32_t n = 0;
+        if (proj_loaded() >= 0) {
+            b[n++] = 'V';
+            b[n++] = (char)('1' + var_cur);
+            if (cue.q_var) {
+                b[n++] = '>';
+                b[n++] = 'V';
+                b[n++] = (char)('0' + cue.q_var);
+            }
+        }
+        b[n] = 0;
+        if (fill_on)
+            str_cpy(b + n, (fill_on & FILL_LATCH) ? (n ? " FILL>END" : "FILL>END") : (n ? " FILL" : "FILL"), sizeof b - n);
+        n = (uint32_t)str_len(b);
+        if (perf_macros_on())
+            str_cpy(b + n, n ? " FX ON" : "FX ON", sizeof b - n);
+        if (!b[0])
+            str_cpy(b, "G4 LEARN: HOLD GLO", sizeof b);
+        x = (240 - md_text_w(&MD_F3, 2, b)) / 2;
+        md_text(x, 44, &MD_F3, 2, b, C_INK);
+        if (perf_macros_on()) {                       /* FX ON inverted: the one thing that stays on */
+            int32_t fw = md_text_w(&MD_F3, 2, "FX ON"), fx = x + md_text_w(&MD_F3, 2, b) - fw;
+            cv_rect(fx - 2, 42, fw + 4, 14, C_INK);
+            md_text(fx, 44, &MD_F3, 2, "FX ON", C_BG);
+        }
+    } else {
+        str_cpy(b, ui.ml.on ? "G4 LEARN: ON" : mute_latched ? "G4 LEARN: HOLD GLO" : "G4 LEARN: OFF", sizeof b);
+        x = (240 - md_text_w(&MD_F3, 2, b)) / 2;
+        md_text(x, 44, &MD_F3, 2, b, C_INK);
+        if (!ui.ml.on)
+            cv_dither(x, 44, md_text_w(&MD_F3, 2, b), 10, C_BG);
+    }
     cv_blit(0, 164);
 }
 /* PERFORM: KNOB 1..4 FILTER CRUSH THROW DEPTH (SHIMMER while OCT UP / DN plays) */

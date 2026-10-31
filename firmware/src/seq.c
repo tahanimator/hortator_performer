@@ -8,7 +8,12 @@
  * before each block (events_block). Grids (grids.c) runs on its own 1/32 clock and plays the tracks whose SRC
  * is one of its channels. KEYS (seq_mode 3): the keys play the selected track chromatically (keys_on). */
 static volatile uint8_t transport_req;   /* 1 start, 2 stop (from the UI) */
-static volatile uint8_t fill_on;         /* REC held off SEQ (ui_input.c rec_fill): FILL steps play, !FILL ones not */
+static volatile uint8_t fill_on;         /* a fill (FILL steps play, !FILL ones not) while any bit is set: FILL_REC REC
+                                          * held off SEQ (ui_input.c rec_fill), FILL_KEY A4 held on the latched MUTE
+                                          * screen, FILL_LATCH A4 tapped there: till the pattern ends (fork) */
+#define FILL_REC 1u
+#define FILL_KEY 2u
+#define FILL_LATCH 4u
 static volatile uint8_t panic_req;       /* bit per track: cut its voices */
 #if FELUCCA_BLE
 static void bt_midi_out_isr(uint32_t pkt); /* bt_midi.c: what goes to USB MIDI out, to the BLE device too */
@@ -33,6 +38,10 @@ static volatile uint32_t ml_kb_hit;   /* ISR -> main: those presses (no effect p
 /* key index (0 = F3, the lowest key) of the white keys F3 G3 A3 B3 C4 D4 E4 F4 -> tracks 1..8 */
 static const uint8_t KEY_TRK_KEY[NTRK] = {0, 2, 4, 6, 7, 9, 11, 12};
 #define KEY_LEARN 14u                    /* G4, the first white key above F4: MIDI LEARN on the MUTE screen (ui_learn.c) */
+#define KEY_FILL 16u                     /* A4: a fill on the MUTE screen (fork: performer v2) */
+#define KEY_SNAP 24u                     /* F5: the jam snapshot (tap: recall, held: store) */
+#define KEY_OPEN 26u                     /* G5: every track open */
+#define KEY_PTN 25u                      /* F#5: mutes at the pattern's end */
 /* the STEP grid: steps 1..16 of a bank on the 16 white keys F3 G3 A3 B3 C4 D4 E4 F4 G4 A4 B4 C5 D5 E5 F5 G5
  * (key index from F3); the black keys do nothing there */
 static const uint8_t STEP_KEY[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
@@ -78,6 +87,11 @@ static uint32_t step_samples(const track_t *t, uint32_t period, uint32_t cnt)
 #define MUTE_LEAD 256u   /* samples ahead of the bar: the COMP source mute fade (5 ms) and a declick end there */
 static struct { uint32_t pos, cnt; uint8_t half, rem, at; } gclk;   /* samples into the 1/16, 1/16s since PLAY, odd 1/32
                                                                       * done; at: a 1/16 started this block (perform.c) */
+static volatile uint8_t mute_mode;      /* main -> ISR: settings.mutebar (panel.c, after this file): 0 NOW, 1 NEXT BAR,
+                                         * 2 PTN END (performer v2); ui_input keeps it in step */
+static volatile uint32_t bar_org;       /* the 1/16 (gclk.cnt) a NEXT BAR bar starts on, mod 16: 0 from PLAY; a cue's
+                                         * switch moves it to the new pattern's step 0 (fork: performer v2) */
+static uint32_t bar16(void) { return (gclk.cnt - bar_org) & 15u; }   /* the sixteenth within the bar, 0..15 */
 static uint32_t grids_l16(uint32_t cnt)
 {
     uint32_t p16 = div_period(2u, gclk.rem);
@@ -119,7 +133,7 @@ static void grids_tick(uint32_t n)
         if (!(gclk.cnt & 3u)) {                     /* METRO (fx.c metro_block): a quarter, the bar's first accented */
             metro.due = gclk.pos + 1u;
             metro.adv = n;
-            metro.bar = !(gclk.cnt & 15u);
+            metro.bar = !((gclk.cnt - bar_org) & 15u);   /* (from the last cue: performer v2) */
         }
         grids_fire();                               /* the even 1/32, on the 1/16 */
     }
@@ -581,6 +595,7 @@ static void seq_stop(void);
 static void seq_start(void)
 {
     uint32_t i;
+    bar_org = 0;                                    /* (bars from PLAY again) */
     acid_gates_close();                             /* (PLAY while playing: nothing slides into step 0) */
     for (i = 0; i < NTRK; i++) {                    /* every track from its step 0, together */
         track_t *t = &trk[i];
@@ -610,6 +625,7 @@ static void seq_start(void)
 static void seq_stop(void)
 {
     song.playing = 0;
+    fill_on &= (uint8_t)~FILL_LATCH;                /* (A4's latched fill ends with the transport: performer v2) */
     acid_gates_close();                             /* ACID: no note drones on */
     motion_end();                                   /* motion.c: the patch back */
     chain_stop();                                   /* song.c: the timing and REC back */
@@ -667,13 +683,25 @@ static void seq_tick(track_t *t, uint32_t n)
  * bar was never seen: the mutes waited forever); lead = a pulse: the source mutes on the bar's last pulse before it */
 static __attribute__((noinline)) uint32_t mute_bar(uint32_t adv, uint32_t lead)
 {
-    uint32_t i, pr = 0, src = comp_src(), gs = comp_ghost_src(), sb = gs < NTRK ? 1u << gs : 0u, l16;
-    int bar;
+    uint32_t i, pr = 0, src = comp_src(), gs = comp_ghost_src(), sb = gs < NTRK ? 1u << gs : 0u, l16, pb, pd = PTN_NOT_YET;
+    int src_due, due;
+    if ((fill_on & FILL_LATCH) || (song.mute_q && mute_mode == 2u))   /* (performer v2: the pattern's end) */
+        pd = song.playing ? pattern_end_dist(&pb) : PTN_NOT_YET;
+    if ((fill_on & FILL_LATCH) && pd <= adv)
+        fill_on &= (uint8_t)~FILL_LATCH;            /* A4's latched fill: to the pattern's end */
     if (!song.mute_q)
         return 0;
-    l16 = grids_l16(gclk.cnt);
-    bar = song.playing && ((gclk.cnt + 1u) & 15u) == 0u;
-    if (bar && (song.mute_q & sb) && gclk.pos + adv + lead >= l16) {
+    if (mute_mode == 2u) {                   /* PTN END: where the pattern ends, as a cue does */
+        src_due = song.playing && pd != PTN_NOT_YET && pd <= adv + lead;
+        due = !song.playing || (pd != PTN_NOT_YET && pd <= adv);
+    } else {                                        /* NEXT BAR: 16 sixteenths from PLAY, or from the last cue */
+        int bar;
+        l16 = grids_l16(gclk.cnt);
+        bar = song.playing && ((gclk.cnt + 1u - bar_org) & 15u) == 0u;
+        src_due = bar && gclk.pos + adv + lead >= l16;
+        due = !song.playing || (bar && gclk.pos + adv >= l16);
+    }
+    if (src_due && (song.mute_q & sb)) {
         if (!trk[src].p[P_MUTE]) {
             trk[src].p[P_MUTE] = 1;                 /* mute: its 5 ms fade (fx.c) ends before the bar's first hit */
             song.mute_q &= (uint8_t)~sb;
@@ -681,7 +709,7 @@ static __attribute__((noinline)) uint32_t mute_bar(uint32_t adv, uint32_t lead)
             pr |= sb;                               /* unmute: its silent voices end (declick) before the bar */
         }
     }
-    if (!song.playing || (bar && gclk.pos + adv >= l16)) {
+    if (due) {
         for (i = 0; i < NTRK; i++)
             if ((song.mute_q >> i) & 1u) {
                 trk[i].p[P_MUTE] = (int16_t)!trk[i].p[P_MUTE];

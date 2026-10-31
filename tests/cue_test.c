@@ -1440,10 +1440,19 @@ static void cue_black_keys_elsewhere(void)
         keys(0);
         fm1_in.buttons |= 1u << panel.btn[b];
         ui_frame();
-        OK(!cue.q_var && var_cur == 0u);
+        if (i)                                        /* PERFORM: no cue */
+            OK(!cue.q_var && var_cur == 0u);
+        else                                          /* the MUTE screen (performer v2): the black keys cue */
+            OK(cue.q_var || var_cur == 2u);
         release_all();
         ui_frame();
         ui_frame();
+        if (!i) {
+            stop();
+            two_slots();
+            play();
+            release_all();
+        }
     }
     ui.menu = 1;                                      /* the menu */
     ui_frame();
@@ -1451,7 +1460,7 @@ static void cue_black_keys_elsewhere(void)
     OK(!cue.q_var);
     ui.menu = 0;
     stop();
-    check("black keys: no cue on SOUND, FX, LFO, COMP, GLOBAL, PROJECT, GRIDS, under KEYS, the MUTE screen, PERFORM "
+    check("black keys: no cue on SOUND, FX, LFO, COMP, GLOBAL, PROJECT, GRIDS, under KEYS, PERFORM (the MUTE screen cues) "
           "or the menu", (int)ok);
 }
 static void cue_black_leds(void)

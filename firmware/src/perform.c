@@ -51,6 +51,7 @@ static volatile uint32_t perf_mask;   /* main: the FX button's bit while its lay
 static volatile uint8_t perf_kill;    /* main: every key effect off (the menu, a dialog, UBOOT; not the knobs) */
 static volatile int8_t perf_k[4];     /* main: the knob macros, 0 = untouched: FILTER -100..100 (- LPF, + HPF),
                                        * CRUSH 0..100, THROW 0..100, DEPTH cut 0..100 (the buffer effects' level) */
+static int perf_macros_on(void) { return perf_k[0] || perf_k[1] || perf_k[2] || perf_k[3]; }   /* (a macro left on) */
 static volatile uint32_t kb_layer;    /* ISR: the keys held that are the layer's, a bit per key */
 static volatile uint32_t perf_held;   /* ISR: the effects held (PF_*): perf_kh | perf_mh */
 static volatile uint32_t perf_kh;     /* ISR: .. by the layer's keys */

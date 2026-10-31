@@ -5,6 +5,32 @@ released yet are listed under Unreleased.
 
 ## Unreleased
 
+**Performer v2** (fork, Meat Proxy; docs/PLAN_performer_v2.md). The latched MUTE screen becomes a self-contained
+performance mode: everything a mute jam needs, without closing it.
+
+- **Scenes on the black keys.** Latched (or with GLO held), the first 8 black keys queue variations 1–8 as they do
+  on HOME: the playing one lit, a queued one blinking, the same key again switches at the next step. The footer
+  shows `V3`, or `V3▸V5` while one is queued.
+- **Fill on A4.** Held: a fill while held. Tapped: a fill until the pattern ends (`FILL▸END`); tapped again before:
+  none. STOP ends it.
+- **The knobs are the PERFORM macros** (FILTER, CRUSH, THROW, DEPTH) while latched. **Hold OCT+ 1 s** to set all
+  four back to 0 (`FX CLEARED`). The FX button is lit on every screen while a macro is on, and the latched footer
+  shows `FX ON`.
+- **Mutes at the pattern's end: PTN END.** A third mute timing beside NOW and NEXT BAR: on the top F# while latched,
+  and as GLOBAL 3/3 MUTE's third value. A mute lands where a cue would. Kept over power-off (an older Hortator reads
+  it as NEXT BAR).
+- **NEXT BAR follows the pattern.** After a cue, NEXT BAR's bars (and METRO's accent) count from the new pattern's
+  step 0, so mutes and cues agree on the downbeat after odd lengths.
+- **The bar strip.** Under the track boxes: 16 pips with the sixteenth playing lit, and the longest track's bar of
+  its pattern (`2/4`).
+- **The jam snapshot.** The mutes and the variation, taken by itself the first time the screen latches after a STOP.
+  **F5 held 1 s** stores the present state; **F5 tapped** goes back to it; **G5 tapped** opens every track. Both follow
+  NOW / NEXT BAR / PTN END and a second tap before they land cancels them. RAM only. F5 is lit while a snapshot
+  exists, G5 while a track is muted.
+- **REC can't start recording by accident in a set.** With MUTE SCREEN LATCH, while playing, a REC tap that would
+  start recording (REC ALL, or arming a track on TRACKS) says `REC? TAP AGAIN`; only a second tap within 1.5 s
+  starts it. Ending REC ALL, stopped, and HOLD mode: one tap, as before.
+
 - **MUTE SCREEN: LATCH** (fork, Meat Proxy): a new menu row, MUTE SCREEN, HOLD (as before) or LATCH. With LATCH,
   letting go of GLO after the MUTE screen opened keeps it up, and the white keys go on toggling the mutes with GLO
   up, for one-handed mute performance. The next GLO press, or OCT-, closes it and does nothing else. A GLO tap still

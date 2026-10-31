@@ -169,16 +169,17 @@ static int boot(int kind, uint32_t seed, int seq)
         render_mix(0, 0, CTL * 64);
         ui_frame();
     }
-    return bounded && settings.zoom <= 1u && settings.mutebar <= 1u && (seq ? safe_start && peak == 0 : !safe_start);
+    return bounded && settings.zoom <= 1u && settings.mutebar <= 2u && (seq ? safe_start && peak == 0 : !safe_start);
 }
 
-/* MUTE NEXT BAR (TRACKS) survives a power cycle beside ZOOM, in Felucca's settings format (zoom's bit 1) */
+/* MUTE NEXT BAR (TRACKS) survives a power cycle beside ZOOM, in Felucca's settings format (zoom's bit 1); PTN END
+ * (performer v2) and MUTE SCREEN LATCH too, in the palette word's bits 16 and 15 */
 static int mutebar_persists(void)
 {
     int ok = 1;
     uint32_t z, m;
     for (z = 0; z < 2u; z++)
-        for (m = 0; m < 2u; m++) {
+        for (m = 0; m < 3u; m++) {
             memset(hflash, 0xFF, sizeof hflash);
             host_init();
             persist_boot();                          /* finds the flash */
@@ -188,11 +189,13 @@ static int mutebar_persists(void)
             settings.zoom = z;
             settings.mutebar = m;
             settings.accel = (z ^ m) & 1u;
+            mutelatch = (m + z) & 1u;
             settings_save();
             rfill(&settings, sizeof settings);       /* power off: .noinit is anything */
             persist_boot();
             settings_init();
-            ok &= settings.zoom == z && settings.mutebar == m && settings.accel == ((z ^ m) & 1u);
+            ok &= settings.zoom == z && settings.mutebar == m && settings.accel == ((z ^ m) & 1u) &&
+                  mutelatch == ((m + z) & 1u);
         }
     return ok;
 }

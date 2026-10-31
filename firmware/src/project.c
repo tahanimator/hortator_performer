@@ -2053,6 +2053,8 @@ static void persist_boot(void)                    /* before settings_init / pane
             backlight = (p.palette >> 9) & 7u;
         settings.zoom = p.zoom & 1u;
         settings.mutebar = (p.zoom >> 1) & 1u;     /* kept in zoom's bit 1: the flash format stays Felucca's */
+        if (settings.mutebar && ((p.palette >> 16) & 1u))
+            settings.mutebar = 2;                   /* palette bit 16: PTN END (performer v2; older: NEXT BAR) */
         settings.accel = !((p.zoom >> 2) & 1u);    /* bit 2 = KNOB ACCEL OFF: older saves read as on */
         settings.usbfix = (p.zoom >> 3) & 1u;      /* bit 3 = USB LEVEL FIXED: older saves read MASTER */
         settings.perfpage = (p.zoom >> 4) & 1u;    /* bit 4 = PERFORM PAGE: older saves read HOLD */
@@ -2207,11 +2209,12 @@ static void settings_save(void)                    /* asked for while playing: w
 #endif
     p.palette |= (uint32_t)(midi_thru & 1u) << 14;
     p.palette |= (mutelatch & 1u) << 15;              /* (an older Hortator ignores bit 15: HOLD there) */
+    p.palette |= (uint32_t)(settings.mutebar == 2u) << 16;   /* PTN END (zoom bit 1 says NEXT BAR to an older one) */
     /* an older Hortator reads a palette out of range from bit 8: its display settings reset; 9..11 BACKLIGHT's level
      * (item 9: an older one reads lowcut's bit 7, ON); 12 USB AUDIO 10 CH (an older one ignores it); 14 MIDI THRU (an
      * older one ignores it) */
     p.lowcut = lc_pack() | btset.bt_hi << 8;
-    p.zoom = (settings.zoom & 1u) | (settings.mutebar & 1u) << 1 | (uint32_t)!settings.accel << 2 | (settings.usbfix & 1u) << 3 |
+    p.zoom = (settings.zoom & 1u) | (uint32_t)(settings.mutebar != 0u) << 1 | (uint32_t)!settings.accel << 2 | (settings.usbfix & 1u) << 3 |
              (settings.perfpage & 1u) << 4 | (btset.btmode & 3u) << 5 | (btset.bt_type & 1u) << 7 | btset.bt_lo << 8;
     p.panel = panel;
     if (!memcmp(&p, &persist_saved, sizeof p))
