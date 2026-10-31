@@ -12,7 +12,7 @@ saves.
 - **GLO is the JAM button.** Tap: JAM opens and stays. Hold: a peek while held. Inside, **hold GLO 1 s** to leave
   (the title fills; `JAM CLOSED`). Any other button there just says `HOLD GLO TO LEAVE`.
 - **GLO's pages moved to SAVE**: SAVE now goes PROJECT, TOOLS, COPY, GLOBAL, SYSTEM, DEVICE. DEVICE holds MUTE
-  (NOW / BAR / END), METRO, THRU and **LEARN** (MIDI LEARN on / off; it was GLO + G4). A CLK change while playing is
+  (NOW / BAR / END), METRO, THRU and **LEARN** (MIDI LEARN on / off; GLO held + G4 still works too). A CLK change while playing is
   refused (`STOP TO CHANGE CLK`), as it would stop the set.
 - **Keys:** white F3–F4 tracks 1–8; **A4** FILL while held; **F5** SNAP (tap: back to it; hold 1 s: store, a bar
   fills; let go in between: nothing); **G5** OPEN every track; black F#3–A#4 variations 1–8 (again: no change).

@@ -9,8 +9,10 @@ on [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita.
 On a Roman galley, the *hortator* beat the drum that kept the rowers in time. Felucca is a Nile sailing boat; this
 is its drummer.
 
-> **This fork** (by Meat Proxy) adds one option to Hortator: **MENU > MUTE SCREEN: LATCH**, which keeps the MUTE
-> screen up after GLO is let go, so the mutes can be played with one hand ([Mutes](#mutes)). Everything else is
+> **This fork, Hortator Performer** (by Meat Proxy), adds **JAM**: one screen for playing a set with one hand
+> ([Mutes](#mutes); design: [docs/PLAN_performer_v3.md](docs/PLAN_performer_v3.md)). **GLO opens JAM**, so GLO's
+> GLOBAL and SYSTEM pages moved under **SAVE** (after PROJECT, TOOLS, COPY), with a DEVICE page for MUTE, METRO, THRU
+> and LEARN. Where this README says "GLO CH", "GLO CLK" or "GLOBAL 3/3", find them there. Everything else is
 > DEADACTIVE's Hortator as released in 0.26.0.
 >
 > **Install this fork:** <https://tahanimator.github.io/hortator_performer/webapp/installer/> (Chrome or Edge, the
@@ -91,7 +93,7 @@ firmware ([below](#back-to-the-official-firmware)).
 | **ARP** | Grids |
 | **LFO** | the track's two LFOs, side by side on every page (LFO 1 on KNOB 1-2, LFO 2 on KNOB 3-4), then DEST: 4 slots, each a source (LFO 1 / LFO 2), a destination knob and its own depth |
 | **REC** | on TRACKS: arms / disarms the selected track for recording (`T3 REC ARMED` / `T3 REC OFF`; during REC ALL: REC ALL ends, the selected track armed). On every other screen: REC ALL on / off (every track armed, each white key records its own track; off: the arm state from before back). It never starts play: PLAY does. On STEP with KEYS on and stopped: step record. Held on a SEQ page: CLEAR TRACK; on SONG: DELETE ROW / CLEAR SONG |
-| **GLO** | a tap: global and system settings; held: the MUTE screen ([mutes](#mutes); G4: [MIDI LEARN](#midi-learn)) |
+| **GLO** | (fork) a tap: JAM; held: a peek at it; in JAM, held 1 s: leave ([mutes](#mutes); held + G4: [MIDI LEARN](#midi-learn)) |
 | **SAVE** | tap (on the release): projects (save, load, name) and tools; held: the cue map (live cue) |
 | **SCL** (labelled SEL in the web simulator) | KEYS: the keys play the selected track; OCT- / OCT+ set the octave (-2 to +2); on STEP, stopped, REC starts step record |
 | **ENV** | STEPS / TRACKS (and [parameter locks](#parameter-locks)) (a tap, on its release; its LED lit and a padlock in the top bar, left of the battery, in STEPS). **STEPS**: the white keys are the selected track's steps on every page (HOME, EDIT, FX, LFO, COMP, TRACKS armed ...), tapped and held as on SEQ; hold ENV and press OCT+ / OCT- for the next / previous bank; OCT+ held + a step: its accent; OCT+ alone and OCT- keep their page's job (LAYER, back to SOUND, the LFO's RATE MODE). Finger drumming needs TRACKS (ENV off: the keys as before). ENV turns KEYS off, SCL turns STEPS off. Off at power-on |
@@ -112,20 +114,23 @@ USER bank, DELETE). The SOUND pages show the track's preset, with `*` once a SOU
 
 ### Mutes
 
-Hold GLO: the **MUTE screen**, up while GLO is held (a quick GLO tap opens GLOBAL instead; a key pressed while GLO
-is down opens the screen at once). The eight tracks are boxes, **filled = heard, outline = muted**, each with its
-number and model, and under it the key that toggles it (F3 to F4, the white keys; their LEDs lit for the heard
-tracks). The top C# sets `MUTE: NOW`, the top D# `MUTE: NEXT BAR` (the same setting as GLOBAL 3/3 MUTE): with NEXT
-BAR, a mute made while playing blinks, then lands on the next downbeat. G4 (the next white key up) turns
-[MIDI LEARN](#midi-learn) on and off. While the screen is up the keys play nothing and the knobs and the other
-buttons rest, PLAY aside. Let go of GLO: back to the page you were on.
+**JAM** (fork). **Tap GLO**: JAM opens and stays. **Hold GLO**: a peek, gone when you let go. In JAM, **hold GLO
+for 1 s** to leave (the title fills); no other button leaves, and none of them stops the clock, edits a sound, records
+or saves (they say `HOLD GLO TO LEAVE`).
 
-**One-handed mutes (MUTE SCREEN: LATCH).** Hold HOME for the menu and set **MUTE SCREEN** to **LATCH**. Now hold GLO
-until the MUTE screen opens (or press GLO with a key) and let go: the screen stays up, `LATCHED: NOW` or
-`LATCHED: NEXT BAR` at the bottom, and the white keys keep toggling the mutes with GLO up, so one hand plays the
-whole arrangement. Press GLO again, or OCT-, to close it (that press does nothing else: no GLOBAL page). A quick GLO
-tap still opens GLOBAL. PLAY works while it is latched; the knobs, FX and SAVE rest. **HOLD** (the default) is the
-screen as before. The setting is kept over power-off.
+- **The tracks** are tiles, **solid = heard, outline = muted, hatched = about to change**; the white keys F3–F4
+  toggle them (their LEDs lit while heard, blinking in time with PLAY while a change waits).
+- **When changes land**: SAVE › DEVICE › MUTE, NOW, BAR (the next bar) or END (the pattern's end, where a cue
+  lands). The title says what waits and where (`T2 T3 > BAR`). **OCT+** lands everything waiting now; hold OCT+ with
+  a key to make that one change now. **OCT−** cancels what waits; STOP does too.
+- **A4** plays a fill while held. **F5** SNAP: tap to go back to the snapshot (the mutes and the variation); hold 1 s
+  to store the present one (the title fills; let go early: nothing). One is taken by itself the first time JAM opens
+  for a project. **G5** opens every track.
+- **The black keys** queue variations 1–8 for the pattern's end (with OCT+: the next step).
+- **The knobs** are PERFORM's macros (FILTER CRUSH THROW DEPTH), drawn as meters; **FX** tapped sets them to 0, FX
+  held brings PERFORM's key layer over JAM. **SELECT** sets the tempo. **PLAY** starts and stops. **SAVE** held: the
+  cue map.
+- Under the tiles: the bar strip (where the one is; the step a change lands on marked), the variations, the macros.
 
 ### MIDI LEARN
 
@@ -141,8 +146,9 @@ A controller's knobs, faders, buttons and pads can each be learned: up to 32 of 
 | a track's PERFORM mute | hold FX, press its white key F3..F4 | a CC or a note | the track silent while held |
 | a PERFORM macro | on the PERFORM screen, turn KNOB 1..4 (it turns as usual) | a CC | FILTER (0 at 64: left LPF, right HPF), CRUSH, THROW, DEPTH; stays on, as the knob |
 
-- **Turn it on:** hold GLO (the MUTE screen) and press **G4**: `G4 LEARN: ON`, and `MIDI LEARN ON` in the top bar.
-  Let go of GLO: the footer's first row (where the steps are) shows `LEARN: TURN OR PRESS`.
+- **Turn it on:** hold GLO (JAM's peek) and press **G4**, or turn SAVE › DEVICE KNOB 4 (LEARN) on: `MIDI LEARN ON`
+  in the top bar. Let go of GLO: the footer's first row (where the steps are) shows `LEARN: TURN OR PRESS`. JAM
+  opened with a tap turns it off (fork).
 - **Pick a knob:** turn a knob of the selected track on any page: HOME, EDIT (SOUND, LAYER), FX (FILTER, the sends,
   SLICER, RESON), LFO, PATTERN, or LEVEL / LEN / PAN on HOME's TRACKS mode. It edits as usual and the footer says
   `T3 DECAY: SEND A CC`.

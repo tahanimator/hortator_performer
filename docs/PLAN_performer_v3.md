@@ -42,7 +42,8 @@ Nothing in it stops the clock, edits a sound, records or saves.
 7. **Setup lives elsewhere.**
    - GLO's GLOBAL / SYSTEM pages and the device page (MUTE timing, METRO, THRU, MIDI LEARN) are SAVE's, after COPY.
    - CLK changes are refused while playing.
-   - MIDI LEARN starts from DEVICE › KNOB 4 and is switched off when JAM opens, so PLAY stays PLAY.
+   - MIDI LEARN starts from DEVICE › KNOB 4, or as upstream from GLO held + G4 in the peek. Opening JAM latched
+     switches it off, so PLAY stays PLAY.
 
 ## The map
 
