@@ -107,6 +107,9 @@ static void ui_host_init(void)
     host_init();
     memset(&ui, 0, sizeof ui);
     memset(fb, 0, sizeof fb);
+    mute_latched = 0;                                /* (fork: JAM closed, no snapshot: jam.c) */
+    memset(&jam, 0, sizeof jam);
+    jam.slot = -1;
     panel = PANEL_DEFAULT;
     settings.magic = 0;
     settings_init();

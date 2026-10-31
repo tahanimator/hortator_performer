@@ -74,10 +74,11 @@ static void knob(uint32_t k, int32_t s)
     turn(EN_K1 + k, s);
     ui_frame();
 }
-static int led_lit(uint32_t id)
+static int led_lit(uint32_t id)                     /* (fm1_led, or the full layer while the scan's hook composes them:
+                                                     * a breathing LED elsewhere, e.g. JAM's SNAP, as ui_test's led_on) */
 {
     uint8_t q = led_pos[id];
-    return q != 0xFF && ((fm1_led[q >> 3] >> (q & 7u)) & 1u);
+    return q != 0xFF && (((led_dim_on ? led_lay[q >> 3] : fm1_led[q >> 3]) >> (q & 7u)) & 1u);
 }
 static void snap(const char *name)
 {

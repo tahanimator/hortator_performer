@@ -5,41 +5,34 @@ released yet are listed under Unreleased.
 
 ## Unreleased
 
-**Performer v2** (fork, Meat Proxy; docs/PLAN_performer_v2.md). The latched MUTE screen becomes a self-contained
-performance mode: everything a mute jam needs, without closing it.
+**Performer: JAM** (fork, Meat Proxy; docs/PLAN_performer_v3.md). One performance mode for one-handed mute
+jamming, with an easy door in and a deliberate door out. Nothing in it stops the clock, edits a sound, records or
+saves.
 
-- **Scenes on the black keys.** Latched (or with GLO held), the first 8 black keys queue variations 1–8 as they do
-  on HOME: the playing one lit, a queued one blinking, the same key again switches at the next step. The footer
-  shows `V3`, or `V3▸V5` while one is queued.
-- **Fill on A4.** Held: a fill while held. Tapped: a fill until the pattern ends (`FILL▸END`); tapped again before:
-  none. STOP ends it.
-- **The knobs are the PERFORM macros** (FILTER, CRUSH, THROW, DEPTH) while latched. **Hold OCT+ 1 s** to set all
-  four back to 0 (`FX CLEARED`). The FX button is lit on every screen while a macro is on, and the latched footer
-  shows `FX ON`.
-- **Mutes at the pattern's end: PTN END.** A third mute timing beside NOW and NEXT BAR: on the top F# while latched,
-  and as GLOBAL 3/3 MUTE's third value. A mute lands where a cue would. Kept over power-off (an older Hortator reads
-  it as NEXT BAR).
-- **NEXT BAR follows the pattern.** After a cue, NEXT BAR's bars (and METRO's accent) count from the new pattern's
-  step 0, so mutes and cues agree on the downbeat after odd lengths.
-- **The bar strip.** Under the track boxes: 16 pips with the sixteenth playing lit, and the longest track's bar of
-  its pattern (`2/4`).
-- **The jam snapshot.** The mutes and the variation, taken by itself the first time the screen latches after a STOP.
-  **F5 held 1 s** stores the present state; **F5 tapped** goes back to it; **G5 tapped** opens every track. Both follow
-  NOW / NEXT BAR / PTN END and a second tap before they land cancels them. RAM only. F5 is lit while a snapshot
-  exists, G5 while a track is muted.
-- **REC can't start recording by accident in a set.** With MUTE SCREEN LATCH, while playing, a REC tap that would
-  start recording (REC ALL, or arming a track on TRACKS) says `REC? TAP AGAIN`; only a second tap within 1.5 s
-  starts it. Ending REC ALL, stopped, and HOLD mode: one tap, as before.
+- **GLO is the JAM button.** Tap: JAM opens and stays. Hold: a peek while held. Inside, **hold GLO 1 s** to leave
+  (the title fills; `JAM CLOSED`). Any other button there just says `HOLD GLO TO LEAVE`.
+- **GLO's pages moved to SAVE**: SAVE now goes PROJECT, TOOLS, COPY, GLOBAL, SYSTEM, DEVICE. DEVICE holds MUTE
+  (NOW / BAR / END), METRO, THRU and **LEARN** (MIDI LEARN on / off; it was GLO + G4). A CLK change while playing is
+  refused (`STOP TO CHANGE CLK`), as it would stop the set.
+- **Keys:** white F3–F4 tracks 1–8; **A4** FILL while held; **F5** SNAP (tap: back to it; hold 1 s: store, a bar
+  fills; let go in between: nothing); **G5** OPEN every track; black F#3–A#4 variations 1–8 (again: no change).
+  **Knobs:** the PERFORM macros, drawn as four meters; **FX** tapped sets them to 0, held brings PERFORM's key layer
+  over JAM. **SELECT:** BPM. **SAVE held:** the cue map.
+- **One timing rule.** Tracks, OPEN and SNAP land as DEVICE's MUTE says: NOW, the next BAR, or the pattern's END (new:
+  where a cue lands; an older Hortator reads it as NEXT BAR). Variations switch at the pattern's end. **OCT+** tapped
+  lands everything waiting now, held with a key lands that change now; **OCT−** cancels everything waiting; **STOP**
+  cancels it too. NEXT BAR's bars (and METRO's accent) count from the last cue's step 0.
+- **One look.** Solid = sounding, outline = muted, hatched = about to change. The title says what waits and where it
+  lands (`T2 T3 > BAR`, `V3 > END`); messages appear there, inverted. Under the tracks: the bar strip (the landing
+  step marked; on END the pattern's own steps), the variations, the macros, SAVE's chip. LEDs: steady = on, blinking
+  with PLAY = about to change, breathing = would act (SNAP, OPEN, OCT±).
+- **The snapshot** is taken by itself when JAM first opens for a project, and never re-taken over a stored one. RAM
+  only.
+- **MIDI LEARN can't hijack PLAY**: opening JAM switches LEARN off. (Before, a brushed G4 on the latched mute screen
+  left LEARN on, and PLAY became a learn target.)
+- Removed from earlier fork builds: MENU › MUTE SCREEN HOLD / LATCH (JAM is always there), the C#5 / D#5 / F#5
+  timing keys, A4's tap-latched fill, OCT+ held to clear the macros, the REC double-tap.
 
-- **MUTE SCREEN: LATCH** (fork, Meat Proxy): a new menu row, MUTE SCREEN, HOLD (as before) or LATCH. With LATCH,
-  letting go of GLO after the MUTE screen opened keeps it up, and the white keys go on toggling the mutes with GLO
-  up, for one-handed mute performance. The next GLO press, or OCT-, closes it and does nothing else. A GLO tap still
-  opens GLOBAL. Kept over power-off (an older Hortator reads HOLD). The menu's rows are a pixel closer to fit the
-  twelfth.
-- **Fixed (LATCH): PLAY stopped working.** On the latched MUTE screen G4, the white key next to track 8's F4, still
-  turned MIDI LEARN on with GLO up; a brush left LEARN on, and with LEARN on PLAY is picked as a learn target
-  instead of starting or stopping. Latched, G4 now does nothing (the screen says `G4 LEARN: HOLD GLO`); GLO held +
-  G4 turns MIDI LEARN on and off as before.
 - **Installer: choose your FM-1** (fork): a new step on the web installer, *Search for MIDI devices*, lists every
   MIDI port, asks the ones named like an FM-1 to identify themselves and marks those that answer; pick one and
   Install uses it. Ports an OS names apart are paired (Windows' `MIDIIN2 (FM-1)` / `MIDIOUT2 (FM-1)`, `FM-1 Port 1`),

@@ -23,8 +23,10 @@ static void led_pos_init(void)
 }
 
 static void fill_set(uint32_t bit, int on);
-static struct { uint8_t mutes, var, valid, armed; } jam_snap = {0, 0, 0, 1};   /* the jam snapshot (performer v2) */
-static uint8_t mutes_now(void);
+static void jam_leds(uint8_t *nl, uint8_t *nb);   /* jam.c (included below) */
+static int jam_pending(void);
+static void jam_panel(uint32_t pressed, uint32_t now);
+static void jam_fx_tap(void);
 static void led_put(uint8_t *nl, uint32_t id, int on)
 {
     uint8_t q = led_pos[id];
@@ -114,6 +116,8 @@ static int track_keys(void)
 #define OCT_BR_DN 8u
 static uint32_t oct_leds(void)
 {
+    if (ui.mute && !ui.layer)                         /* JAM: OCT- cancels, OCT+ lands, what waits */
+        return jam_pending() ? OCT_BR_DN | OCT_BR_UP : 0u;
     if (ui.mute || ui.layer)
         return 0;
     if (name_on())
@@ -198,8 +202,7 @@ static void ui_leds(void)
 {
     uint8_t nl[FM1_NCOL] = {0}, nb[FM1_NCOL] = {0};
     uint32_t k, fam = cur_fam(), beats = 0;           /* beats: the keys of steps 1 5 9 13 (step keys) */
-    uint32_t bk = !ui.cue_map && (cue_bk_page() || ui.mute) ? CUE_BK_MASK : 0u;   /* the black keys show the
-                                                       * variations (and on the MUTE screen: performer v2) */
+    uint32_t bk = !ui.cue_map && cue_bk_page() ? CUE_BK_MASK : 0u;   /* the black keys show the variations */
     static uint8_t ready;
     if (safe_start) {                                 /* safe start: LEDs off */
         uint32_t c0;
@@ -231,18 +234,8 @@ static void ui_leds(void)
             led_put(nb, 14u + key, c == CM_BREATHE);
         }
         led_put(nl, panel.btn[B_SAVE], 1);
-    } else if (ui.mute) {                             /* MUTE screen: the tracks' keys lit while audible, blinking
-                                                       * while a mute waits for the bar; top C# (NOW) / D# (NEXT BAR) */
-        int blink = (int)((fm1_ticks() / (250u * 1000u * FM1_TICKS_PER_US)) & 1u);
-        for (k = 0; k < NTRK; k++)
-            led_put(nl, 14u + KEY_TRK_KEY[k], !trk[k].p[P_MUTE] ^ (((song.mute_q >> k) & 1u) && blink));
-        led_put(nl, 14u + 20u, settings.mutebar == 0u);
-        led_put(nl, 14u + 22u, settings.mutebar == 1u);
-        led_put(nl, 14u + KEY_PTN, settings.mutebar == 2u);   /* F#5: PTN END (performer v2) */
-        led_put(nl, 14u + KEY_SNAP, jam_snap.valid);       /* F5: a snapshot to go back to */
-        led_put(nl, 14u + KEY_OPEN, mutes_now() != 0u);   /* G5: something to open */
-        led_put(nl, 14u + KEY_LEARN, ui.ml.on);       /* G4: MIDI LEARN */
-        led_put(nl, panel.btn[B_GLO], 1);
+    } else if (ui.mute) {                             /* JAM (jam.c) */
+        jam_leds(nl, nb);
     } else if (name_on()) {                           /* NAME: the keys that type */
         uint32_t m = name_leds(fm1_ticks());
         for (k = 0; k < 27u; k++)
@@ -391,9 +384,9 @@ static void tracks_edit(uint32_t slot, int32_t steps)
     ml_knob(song.sel, id);                          /* (MIDI LEARN: picked) */
 }
 
-static const char *const MUTE_MODE_SAY[3] = {"MUTE: NOW", "MUTE: NEXT BAR", "MUTE: PTN END"};
+static const char *const MUTE_MODE_SAY[3] = {"MUTES: NOW", "MUTES: NEXT BAR", "MUTES: AT END"};
 static void mute_bar_set(uint32_t m)                   /* the mutes: at once / on the next bar / at the pattern's end
-                                                         * (performer v2) (device setting) */
+                                                         * (fork) (device setting) */
 {
     settings.mutebar = m < 3u ? m : 0u;
     mute_mode = (uint8_t)settings.mutebar;
@@ -453,26 +446,6 @@ static void rec_tap(void)                              /* a REC tap (the button,
     ui.rec_all = 1;
     song.rec = REC_ALL_MASK;                           /* (no play started) */
     ui_message("REC ALL");
-}
-
-/* MENU MUTE SCREEN LATCH (the performance setting; fork, performer v2): while the transport runs, a REC tap of the
- * button that would START recording (arm a track on TRACKS, or REC ALL elsewhere) asks first, REC? TAP AGAIN, and only a
- * second tap within 1.5 s does it: a stray REC in a set no longer records every key that follows. Ending REC ALL or
- * disarming, stopped, HOLD and the SMC's REC: as before (a learned REC is a button tap: it asks too) */
-#define REC_ASK_MS 1500u
-static void rec_tap_button(uint32_t now)
-{
-    static uint32_t ask_t0;
-    int starts = !ui.rec_all && (!mix_mode() || !((song.rec >> song.sel) & 1u));
-    if (mutelatch && song.playing && starts) {
-        if (!ask_t0 || now - ask_t0 >= REC_ASK_MS * 1000u * FM1_TICKS_PER_US) {
-            ask_t0 = now | 1u;
-            ui_message("REC? TAP AGAIN");
-            return;
-        }
-    }
-    ask_t0 = 0;
-    rec_tap();
 }
 
 /* MOTION page: KNOB 1 PLAY (right ON, left OFF), KNOB 4 CLEAR (a turn right asks: "CLEAR MOTION T<n>?") */
@@ -629,6 +602,12 @@ static void edit_param(uint32_t slot, int32_t steps)
         settings_save();
         return;
     }
+    if (pg->scope == SC_GLOBAL && id == G_LEARN) {    /* LEARN (fork): MIDI LEARN on / off (OCT+ ends it too) */
+        if ((v != 0) != (ui.ml.on != 0))
+            ml_toggle();
+        learn_act = (int16_t)(ui.ml.on != 0);
+        return;
+    }
     if (pg->scope == SC_GLOBAL && id == G_THRU) {     /* THRU: the device setting (midi_out.c), saved */
         midi_thru = (uint8_t)v;
         settings_save();
@@ -726,7 +705,7 @@ static uint32_t btn_hold(uint32_t *t0, uint32_t label, uint32_t now, int hold_ok
 #define FX_DOWN 1u
 #define FX_OPEN 2u
 #define FX_DEAD 4u
-static int fx_allowed(void) { return !ui.menu && !ui.confirm && !name_on() && !ui.mute && !pl_on(); }
+static int fx_allowed(void) { return !ui.menu && !ui.confirm && !name_on() && (!ui.mute || mute_latched) && !pl_on(); }
 /* fixes 2026-10-21 item 7: PERFORM has KNOB 1..4 (fx_layer reads them; set each pass): the page's loop leaves them
  * alone, so detents that come in after fx_layer's read wait for its next one instead of reaching the page under it.
  * 1 PERFORM's; 2 the pass it stops being (FX let go): the detents read then are still the macros', the page's loop
@@ -768,8 +747,12 @@ static void fx_layer(uint32_t now, int home_tap)
         if (!(*t0 & FX_DEAD) && (kb_layer || now - (*t0 & ~7u) >= FX_HOLD_MS * 1000u * FM1_TICKS_PER_US))
             *t0 |= FX_OPEN;
     } else if (*t0) {
-        if (!(*t0 & (FX_OPEN | FX_DEAD)))
-            open_family(FAM_FX);                        /* a tap: the FX pages, as the button always did */
+        if (!(*t0 & (FX_OPEN | FX_DEAD))) {
+            if (ui.mute)
+                jam_fx_tap();                           /* JAM: the macros back to 0 */
+            else
+                open_family(FAM_FX);                    /* a tap: the FX pages, as the button always did */
+        }
         *t0 = 0;
     }
     fx_knobs = (down && !(*t0 & FX_DEAD)) || ui.pg_open || (kb_layer && fx_allowed()) ? 1u : fx_knobs == 1u ? 2u : 0u;
@@ -781,7 +764,7 @@ static void fx_layer(uint32_t now, int home_tap)
                     *t0 |= FX_OPEN;                     /* (a dead hold stays dead: a held layer key's turn
                                                          * opens no map that outlives the key) */
             }
-    if (settings.perfpage && (*t0 & FX_OPEN) && !ui.pg_open && fx_allowed()) {   /* PAGE: the screen stays */
+    if (settings.perfpage && (*t0 & FX_OPEN) && !ui.pg_open && fx_allowed() && !ui.mute) {   /* PAGE: the screen stays */
         ui.pg_open = 1;
         ui.pg_page = ui.page;
         ui.pg_home = ui.home;
@@ -796,199 +779,8 @@ static void fx_layer(uint32_t now, int home_tap)
     }
 }
 
-/* GLO (spec §5): a tap (let go within GLO_HOLD_MS, no key pressed meanwhile) = the GLOBAL pages, on the release; held
- * GLO_HOLD_MS, or a key pressed with it = the MUTE screen while GLO is held: the white keys F3..F4 toggle the tracks'
- * mutes (track_mute_toggle: NOW / NEXT BAR), top C# / D# the mode, G4 MIDI LEARN on / off (ui_learn.c). Every key
- * pressed with GLO is the screen's until let go (seq.c keyboard_block, mute_mask: no note, no MIDI, nothing
- * recorded). Pressed in the menu, NAME or a confirm: dead until let go; with the PERFORM layer up or FX held: a plain
- * button (the release opens GLOBAL) */
-#define GLO_HOLD_MS 400u
-#define GLO_DOWN 1u
-#define GLO_OPEN 2u
-#define GLO_DEAD 4u
-#define GLO_PLAIN 8u
-static int glo_dead(void) { return ui.menu || ui.confirm || name_on() || pl_on(); }
-/* the jam snapshot (performer v2; a Digitakt's Temp Save / Reload for a mute jam): the mutes and the variation, RAM
- * only. Taken by itself the first time the screen latches after a STOP (or at power-on), so there is always a "where I
- * started"; F5 held 1 s stores the present one (SNAP STORED). F5 tapped: back to it; G5 tapped: every track open. Both
- * follow the mute timing (NOW / NEXT BAR / PTN END) and a second tap before it lands cancels it */
-static uint8_t mutes_now(void)                          /* the tracks muted now, a bit each */
-{
-    uint32_t k;
-    uint8_t m = 0;
-    for (k = 0; k < NTRK; k++)
-        m |= (uint8_t)((trk[k].p[P_MUTE] != 0) << k);
-    return m;
-}
-static void snap_take(void)
-{
-    jam_snap.mutes = mutes_now();
-    jam_snap.var = var_cur;
-    jam_snap.valid = 1;
-}
-static void mutes_to(uint8_t target)                    /* every track to target's mute, as the mode says */
-{
-    uint32_t k;
-    uint8_t want = (uint8_t)(mutes_now() ^ target);
-    if (!settings.mutebar) {                            /* NOW: at once */
-        for (k = 0; k < NTRK; k++)
-            if ((want >> k) & 1u)
-                track_mute_toggle(k);
-        return;
-    }
-    fm1_irq_off();                                      /* queued: the lot together; the same again before it lands:
-                                                         * cancelled */
-    song.mute_q = song.mute_q == want ? 0u : want;
-    fm1_irq_on();
-}
-static void snap_recall(void)
-{
-    if (!jam_snap.valid)
-        return;
-    mutes_to(jam_snap.mutes);
-    if (jam_snap.var != var_cur && cue.q_var != jam_snap.var + 1u && proj_loaded() >= 0)
-        (void)cue_var(jam_snap.var);                        /* (its variation, where the pattern ends) */
-    ui_message("SNAP");
-}
-static void mute_keys(uint32_t hits)                   /* the keys the ISR gave the MUTE screen */
-{
-    uint32_t k;
-    for (k = 0; k < NTRK; k++)
-        if ((hits >> KEY_TRK_KEY[k]) & 1u)
-            track_mute_toggle(k);
-    if ((hits >> 20) & 1u)                             /* top C#: NOW */
-        mute_bar_set(0);
-    if ((hits >> 22) & 1u)                             /* top D#: NEXT BAR */
-        mute_bar_set(1);
-    if ((hits >> KEY_PTN) & 1u)                        /* top F#: PTN END (performer v2) */
-        mute_bar_set(2);
-    if ((hits >> KEY_OPEN) & 1u) {                     /* G5: every track open (performer v2) */
-        mutes_to(0);
-        ui_message("ALL OPEN");
-    }
-    for (k = 0; k < 8u; k++)                           /* the first 8 black keys: variations 1..8, as on HOME (fork:
-                                                         * performer v2; project.c cue_var: again = next step) */
-        if ((hits >> CUE_BK[k]) & 1u)
-            (void)cue_var(k);
-    if (((hits >> KEY_LEARN) & 1u) && (fm1_in.buttons >> panel.btn[B_GLO] & 1u))   /* G4: MIDI LEARN on / off
-                                                         * (ui_learn.c), with GLO held only: latched (LATCH), G4 sits
-                                                         * next to track 8's F4, and a brush would leave LEARN on,
-                                                         * PLAY then picked as its target instead of playing */
-        ml_toggle();
-}
-static int cue_owns_keys(void);
-/* MENU > MUTE SCREEN LATCH (fork: Meat Proxy): GLO held (or with a key) opens the MUTE screen as before; let go, it stays
- * up (latched) and the white keys keep toggling the mutes with GLO up, for one hand. The next GLO press closes it and
- * does nothing else (no GLOBAL page on its release, no screen while held); OCT- closes it too (ui_input). A tap still
- * opens GLOBAL. HOLD (the default): as before */
-static uint8_t glo_eat;                                /* this GLO press closed the latched screen: its release is no tap */
-static void mute_unlatch(void)
-{
-    mute_latched = 0;
-    ui.mute = 0;
-    ui.force = 1;
-}
-static void glo_input(uint32_t now, uint32_t notes)
-{
-    uint32_t bit = 1u << panel.btn[B_GLO], *t0 = &ui.glo_t0, hits = 0, spent;
-    if (kb_mute_hit && !cue_owns_keys()) {             /* (SAVE held: the cue map's, cue_input) */
-        fm1_irq_off();
-        hits = kb_mute_hit;
-        kb_mute_hit = 0;
-        fm1_irq_on();
-    }
-    if (fm1_in.buttons & bit) {
-        if (!*t0) {
-            *t0 = (now & ~15u) | GLO_DOWN;
-            if (mute_latched) {                         /* LATCH: this press closes the screen, and is spent */
-                mute_unlatch();
-                glo_eat = 1;
-            }
-        }
-        spent = glo_eat;
-        if (glo_eat)
-            ;
-        else if (!(*t0 & GLO_OPEN) && glo_dead())
-            *t0 |= GLO_DEAD;
-        else if (!(*t0 & GLO_OPEN) && (ui.layer || ui.fx_t0))
-            *t0 |= GLO_PLAIN;
-        if (!glo_eat && !(*t0 & (GLO_OPEN | GLO_DEAD | GLO_PLAIN)) &&
-            (notes || hits || now - (*t0 & ~15u) >= GLO_HOLD_MS * 1000u * FM1_TICKS_PER_US)) {
-            *t0 |= GLO_OPEN;                            /* the MUTE screen */
-            ui.mute = 1;
-            ui.force = 1;
-            grid_drop_holds();                          /* a grid key held edits nothing under it */
-        }
-    } else if (*t0) {
-        uint32_t was = *t0;
-        spent = glo_eat;
-        if (!glo_eat && !(was & (GLO_OPEN | GLO_DEAD)) && !glo_dead()) {
-            if (mutelatch && song.playing && !(was & GLO_PLAIN)) {   /* LATCH, playing: a tap latches the MUTE screen
-                                                         * (fork: no GLOBAL page, CLK on its knob 3, mid-set) */
-                ui.mute = 1;
-                ui.force = 1;
-                grid_drop_holds();
-                was |= GLO_OPEN;
-            } else
-                open_family(FAM_GLO);                   /* a tap: the GLOBAL pages */
-        }
-        *t0 = 0;
-        if (ui.mute) {
-            if (mutelatch && (was & GLO_OPEN) && !glo_dead()) {
-                mute_latched = 1;                       /* LATCH: the screen stays, the keys stay its own */
-                ui_message("MUTES LATCHED");
-                if (jam_snap.armed || !jam_snap.valid) {        /* the first latch after a STOP: the snapshot, by itself */
-                    snap_take();
-                    jam_snap.armed = 0;
-                }
-            } else {
-                ui.mute = 0;                            /* let go: the screen before */
-                ui.force = 1;
-            }
-        }
-        glo_eat = 0;
-    } else
-        spent = 0;
-    if (hits && !glo_dead() && !spent)                 /* (keys struck with the closing GLO: nothing) */
-        mute_keys(hits);
-    {                                                   /* A4 on the MUTE screen (performer v2): held, a fill while
-                                                         * held; tapped (let go within 250 ms), a fill to the pattern's
-                                                         * end (seq.c mute_bar), tapped again before: none */
-        static uint32_t a4_t0;
-        int a4 = ui.mute && !spent && ((kb_mute >> KEY_FILL) & 1u);
-        if (a4 && !a4_t0)
-            a4_t0 = now | 1u;
-        if (!a4 && a4_t0) {
-            if (ui.mute && now - (a4_t0 & ~1u) < 250u * 1000u * FM1_TICKS_PER_US)
-                fill_set(FILL_LATCH, !(fill_on & FILL_LATCH));
-            a4_t0 = 0;
-        }
-        if (a4 != ((fill_on & FILL_KEY) != 0u))
-            fill_set(FILL_KEY, a4);
-    }
-    {                                                   /* F5 (performer v2): tapped, the snapshot back; held 1 s, the
-                                                         * present one stored */
-        static uint32_t f5_t0;
-        int f5 = ui.mute && !spent && ((kb_mute >> KEY_SNAP) & 1u);
-        if (f5 && !f5_t0)
-            f5_t0 = now | 1u;
-        if (f5 && !(f5_t0 & 2u) && now - (f5_t0 & ~3u) >= 1000u * 1000u * FM1_TICKS_PER_US) {
-            f5_t0 |= 2u;
-            snap_take();
-            ui_message("SNAP STORED");
-        }
-        if (!f5 && f5_t0) {
-            if (ui.mute && !(f5_t0 & 2u))
-                snap_recall();
-            f5_t0 = 0;
-        }
-    }
-    if (!song.playing)
-        jam_snap.armed = 1;                                 /* (the next latch takes the snapshot by itself) */
-    mute_mask = (mute_mask & ~bit) |                   /* (SAVE's bit: cue_input's) */
-                ((*t0 & GLO_OPEN) || (!(*t0 & (GLO_DEAD | GLO_PLAIN)) && !glo_dead() && !ui.layer && !ui.fx_t0) ? bit
-                                                                                                                : 0u);
-}
+#include "jam.c"                                   /* the JAM screen: GLO, its keys, its panel, LEDs and screen
+                                                    * (fork: Meat Proxy) */
 
 /* SAVE (spec 2026-10-26, the live cue): a tap opens the projects page on its release (as FX / GLO); held 0.4 s, or
  * pressed with a key, the cue map: white keys 1..4 queue slots A..D, the black keys F#3 .. A#4 (CUE_BK) variations 1..8
@@ -1001,8 +793,7 @@ static void glo_input(uint32_t now, uint32_t notes)
  * release then is no tap (rec_t0's bit 1: btn_hold). A shorter press is the tap, on the release, as before. Not in the
  * menu, a confirm, NAME, the PRESETS list, the MUTE screen or MIDI LEARN. A learned REC and the SMC's REC are taps */
 #define FILL_HOLD_MS 400u
-static void fill_set(uint32_t bit, int on)             /* one source of the fill (seq.c FILL_*), the others kept: the ISR
-                                                         * clears FILL_LATCH, so the main loop's change is IRQ-safe */
+static void fill_set(uint32_t bit, int on)             /* one source of the fill (seq.c FILL_*), the others kept */
 {
     fm1_irq_off();
     fill_on = (uint8_t)(on ? fill_on | bit : fill_on & ~bit);
@@ -1029,7 +820,7 @@ static void rec_fill(uint32_t now)
 #define CUE_OPEN 2u
 #define CUE_DEAD 4u
 #define CUE_PLAIN 8u
-static int cue_dead(void) { return ui.menu || ui.confirm || name_on() || pl_on() || ui.mute; }
+static int cue_dead(void) { return ui.menu || ui.confirm || name_on() || pl_on() || (ui.mute && !mute_latched); }
 static int cue_owns_keys(void)                         /* SAVE held (GLO not): the keys pressed now are the map's */
 {
     return ((fm1_in.buttons >> panel.btn[B_SAVE]) & 1u) && !((fm1_in.buttons >> panel.btn[B_GLO]) & 1u) &&
@@ -1069,8 +860,13 @@ static void cue_input(uint32_t now, uint32_t notes)
             grid_drop_holds();                          /* a grid key held edits nothing under it */
         }
     } else if (*t0) {
-        if (!(*t0 & (CUE_OPEN | CUE_DEAD)) && !cue_dead())
-            open_family(FAM_SAVE);                      /* a tap: the projects page (then TOOLS, COPY) */
+        if (!(*t0 & (CUE_OPEN | CUE_DEAD)) && !cue_dead()) {
+            if (ui.mute)
+                ui_message("HOLD GLO TO LEAVE");        /* (JAM: SAVE held is the cue map, a tap nothing) */
+            else
+                open_family(FAM_SAVE);                  /* a tap: the projects page (then TOOLS, COPY, the GLOBAL
+                                                         * pages: fork) */
+        }
         *t0 = 0;
         if (ui.cue_map) {
             ui.cue_map = 0;                             /* let go: the screen before */
@@ -1335,33 +1131,8 @@ static void ui_input(void)
         pressed |= 1u << panel.btn[B_PLAY];
     if ((acts & 2u) && rec == BT_NONE)
         rec = BT_TAP;
-    if (ui.mute) {                                      /* the MUTE screen owns the panel (its keys: glo_input), PLAY
-                                                         * aside; a HOME / REC press under it is no tap or hold */
-        if ((pressed >> panel.btn[B_PLAY]) & 1u)
-            play_press();
-        if (mute_latched && ((pressed >> panel.btn[B_OCTDN]) & 1u))
-            mute_unlatch();                             /* LATCH: OCT- closes the screen too (BACK) */
-        if (ui.home_t0)
-            ui.home_t0 |= 2u;
-        if (ui.rec_t0)
-            ui.rec_t0 |= 2u;
-        if (mute_latched) {                             /* latched (performer v2): KNOB 1-4 the PERFORM macros, OCT+
-                                                         * held 1 s all four back to 0 */
-            static uint32_t oct_t0;
-            for (k = 0; k < 4u; k++)
-                if ((s = panel_enc(EN_K1 + k)) != 0)
-                    perf_knob_turn(k, s);
-            if ((pressed >> panel.btn[B_OCTUP]) & 1u)
-                oct_t0 = now | 1u;
-            if (!((fm1_in.buttons >> panel.btn[B_OCTUP]) & 1u))
-                oct_t0 = 0;
-            else if (oct_t0 && !(oct_t0 & 2u) && now - (oct_t0 & ~3u) >= 1000u * 1000u * FM1_TICKS_PER_US) {
-                oct_t0 |= 2u;
-                perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
-                ui_message("FX CLEARED");
-            }
-        }
-        enc_drop();
+    if (ui.mute && !ui.layer) {                         /* JAM owns the panel (jam.c; its keys: glo_input) */
+        jam_panel(pressed, now);
         return;
     }
     if ((fm1_in.buttons & perf_mask) || (perf_mask & PERF_PAGE))   /* PERFORM: keys are the layer's */
@@ -1410,8 +1181,7 @@ static void ui_input(void)
         } else if (srec_ok()) {
             srec_start();                               /* KEYS, STEP, stopped: step record */
         } else if (!song_lock()) {
-            rec_tap_button(now);                        /* TRACKS: the selected track armed / disarmed; else REC ALL
-                                                         * (LATCH, playing: asks first) */
+            rec_tap();                                  /* TRACKS: the selected track armed / disarmed; else REC ALL */
         }
     }
     if (ui.confirm) {                                   /* OCT- cancels (NO), OCT+ clears (YES); nothing else reacts */
@@ -1465,6 +1235,7 @@ static void ui_input(void)
     song.act[2] = (int16_t)settings.mutebar;
     song.act[3] = (int16_t)fx_metro;
     song.act[4] = (int16_t)midi_thru;
+    learn_act = (int16_t)(ui.ml.on != 0);
     bank_fix();                                         /* LEN may have changed (knob, load) */
     if (!ui.home && page_hidden(ui.page)) {             /* the engine changed: its last EDIT page */
         while (ui.page > page_first(FAM_SND) && page_hidden(ui.page))

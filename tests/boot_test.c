@@ -172,8 +172,8 @@ static int boot(int kind, uint32_t seed, int seq)
     return bounded && settings.zoom <= 1u && settings.mutebar <= 2u && (seq ? safe_start && peak == 0 : !safe_start);
 }
 
-/* MUTE NEXT BAR (TRACKS) survives a power cycle beside ZOOM, in Felucca's settings format (zoom's bit 1); PTN END
- * (performer v2) and MUTE SCREEN LATCH too, in the palette word's bits 16 and 15 */
+/* MUTE NEXT BAR (TRACKS) survives a power cycle beside ZOOM, in Felucca's settings format (zoom's bit 1); END (fork)
+ * too, in the palette word's bit 16 */
 static int mutebar_persists(void)
 {
     int ok = 1;
@@ -189,13 +189,11 @@ static int mutebar_persists(void)
             settings.zoom = z;
             settings.mutebar = m;
             settings.accel = (z ^ m) & 1u;
-            mutelatch = (m + z) & 1u;
             settings_save();
             rfill(&settings, sizeof settings);       /* power off: .noinit is anything */
             persist_boot();
             settings_init();
-            ok &= settings.zoom == z && settings.mutebar == m && settings.accel == ((z ^ m) & 1u) &&
-                  mutelatch == ((m + z) & 1u);
+            ok &= settings.zoom == z && settings.mutebar == m && settings.accel == ((z ^ m) & 1u);
         }
     return ok;
 }

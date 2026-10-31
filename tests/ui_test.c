@@ -55,7 +55,7 @@ static void test_families(void)
 {
     static const struct { uint32_t btn; uint32_t fam; } MAP[] = {
         {B_EDIT, FAM_SND}, {B_FX, FAM_FX},
-        {B_SEQ, FAM_SEQ}, {B_GLO, FAM_GLO}, {B_SAVE, FAM_SAVE}, {B_ARP, FAM_GRIDS}, {B_LFO, FAM_LFO},
+        {B_SEQ, FAM_SEQ}, {B_SAVE, FAM_SAVE}, {B_ARP, FAM_GRIDS}, {B_LFO, FAM_LFO},   /* (GLO: JAM, fork) */
     };
     uint32_t i, ok = 1;
     ui_host_init();
@@ -66,7 +66,7 @@ static void test_families(void)
         ui_frame();                                  /* (FX opens its pages on the release) */
         ok &= !ui.home && cur_page()->fam == MAP[i].fam;
     }
-    check("buttons open their page families (EDIT SOUND, FX, SEQ, GLO, SAVE, ARP GRIDS, LFO LFO)", ok);
+    check("buttons open their page families (EDIT SOUND, FX, SEQ, SAVE, ARP GRIDS, LFO LFO)", ok);
     press(B_ENV);
     ui_frame();
     release_all();
@@ -1325,9 +1325,9 @@ static void test_home_modes(void)
     tap(B_HOME);
     check("from EDIT a HOME tap opens HOME in the mode last shown (TRACKS)", mix_mode());
     tap(B_HOME);
-    tap(B_GLO);
+    tap(B_SAVE);
     tap(B_HOME);
-    check("from GLO a HOME tap opens HOME in the mode last shown (the HOME screen)", ui.home);
+    check("from SAVE a HOME tap opens HOME in the mode last shown (the HOME screen)", ui.home);
     sel(1);
     sel(1);
     tap(B_SEQ);
@@ -1368,7 +1368,7 @@ static void test_rec_everywhere(void)
 {
     static const struct { const char *what; uint32_t btn, n; } S[] = {
         {"HOME (mode 2)", B_HOME, 0}, {"HOME's TRACKS mode", B_HOME, 1}, {"EDIT", B_EDIT, 1}, {"FX", B_FX, 1},
-        {"GLO", B_GLO, 1}, {"SEQ PATTERN", B_SEQ, 2}, {"LFO", B_LFO, 1}, {"SAVE", B_SAVE, 1},
+        {"SEQ PATTERN", B_SEQ, 2}, {"LFO", B_LFO, 1}, {"SAVE", B_SAVE, 1},
     };
     uint32_t i, j, pg, home;
     char what[96];
@@ -1579,9 +1579,36 @@ static void glo_key(uint32_t key)                    /* a key tapped while GLO i
     keys(0);
     glo_hold_frames(1);
 }
-static int mute_box_filled(uint32_t k)               /* track k's box: lit inside (audible), not just its outline */
+static int mute_box_filled(uint32_t k)               /* track k's tile on JAM (jam.c): solid (audible), not just its
+                                                      * outline */
 {
-    return fb[(MU_BY(k) + MU_BH - 3u) * 240u + MU_BX(k) + 3u] == C_INK;
+    uint32_t x = 4u + (k % 4u) * 58u, y = 16u + 24u + (k / 4u) * 50u;
+    return fb[(y + JAM_TH - 3u) * 240u + x + 3u] == C_INK;
+}
+static void latch_key(uint32_t key)                  /* a key tapped on JAM latched (GLO up) */
+{
+    keys(1u << key);
+    ui_frame();
+    ui_frame();
+    keys(0);
+    ui_frame();
+    ui_frame();                                      /* (the render hands the release over after the UI's pass) */
+}
+static void hold_ms(uint32_t buttons, uint32_t keybits, uint32_t ms)   /* held for ms of the host's clock */
+{
+    uint32_t t0 = fm1_ticks();
+    while (fm1_ticks() - t0 < ms * 1000u * FM1_TICKS_PER_US) {
+        fm1_in.buttons |= buttons;
+        keys(keybits);
+        ui_frame();
+    }
+}
+static void jam_leave(void)                          /* GLO held 1 s inside JAM, then let go */
+{
+    press(B_GLO);
+    hold_ms(glo_bit(), 0, 1100);
+    release_all();
+    ui_frame();
 }
 static void test_mute_screen(void)
 {
@@ -1592,529 +1619,79 @@ static void test_mute_screen(void)
     song.rec = 0;
     press(B_GLO);
     ui_frame();
-    check("GLO pressed: nothing yet (GLOBAL waits for the release)", ui.home && !ui.mute);
+    check("GLO pressed: nothing yet (the release tells a tap from a hold)", ui.home && !ui.mute);
     release_all();
     ui_frame();
-    check("GLO tapped: GLOBAL 1/3 on the release, no MUTE screen",
-          !ui.home && cur_fam() == FAM_GLO && ui.page == page_first(FAM_GLO) && !ui.mute);
+    check("(fork) GLO tapped: JAM, latched; no GLOBAL page", ui.mute && mute_latched && ui.home);
+    snap_page("fixes/jam_latched");
     tap(B_GLO);
-    tap(B_GLO);
-    check("GLO taps go on: SYSTEM 2/3, GLOBAL 3/3", !ui.home && ui.page == page_first(FAM_GLO) + 2u);
+    check("(fork) GLO tapped in JAM: it stays, HOLD GLO TO LEAVE", ui.mute && mute_latched &&
+          str_eq(ui.msg, "HOLD GLO TO LEAVE"));
     tap(B_HOME);
-    check("(HOME again)", ui.home);
+    tap(B_REC);
+    tap(B_OCTDN);
+    check("(fork) JAM: HOME, REC and OCT- leave nothing (no page, no REC)", ui.mute && mute_latched && !song.rec);
+    press(B_GLO);
+    hold_ms(glo_bit(), 0, 500);
+    check("(fork) GLO held 0.5 s in JAM: still up, the title filling", ui.mute && jam_leave_frac(fm1_ticks()) >= 3u);
+    snap_page("fixes/jam_leaving");
+    hold_ms(glo_bit(), 0, 600);
+    check("(fork) GLO held 1 s in JAM: closed, JAM CLOSED", !ui.mute && !mute_latched && str_eq(ui.msg, "JAM CLOSED"));
+    release_all();
+    ui_frame();
+    check("(fork) .. its release does nothing more", !ui.mute && ui.home);
     press(B_GLO);
     glo_hold_frames(150);
     check("GLO held 0.15 s: no screen yet", !ui.mute && ui.home);
     glo_hold_frames(300);
-    check("GLO held 0.4 s: the MUTE screen over HOME", ui.mute && ui.home);
+    check("GLO held 0.4 s: JAM peeks over HOME (not latched)", ui.mute && !mute_latched && ui.home);
     snap_page("fixes/mute_screen");
     ok = 1;
     for (k = 0; k < NTRK; k++)
         ok &= led_lit(14u + KEY_TRK_KEY[k]) == !trk[k].p[P_MUTE] && mute_box_filled(k) == !trk[k].p[P_MUTE];
     check("MUTE screen: boxes filled and keys lit for the audible tracks (track 7 muted: outline, dark)", ok);
-    check("MUTE screen: top C# lit (NOW), top D# dark", led_lit(14u + 20u) && !led_lit(14u + 22u));
     a = hit_age(&trk[2]);
     glo_key(KEY_TRK_KEY[2]);
     check("MUTE screen: key 3 mutes track 3; no sound, no track select", trk[2].p[P_MUTE] == 1 &&
           hit_age(&trk[2]) == a && song.sel == 0 && !mute_box_filled(2) && !led_lit(14u + KEY_TRK_KEY[2]));
     glo_key(KEY_TRK_KEY[6]);
     check("MUTE screen: key 7 unmutes track 7", trk[6].p[P_MUTE] == 0 && mute_box_filled(6));
-    glo_key(22u);                                    /* top D# */
-    check("MUTE screen: top D# = NEXT BAR (the setting), its key lit", settings.mutebar == 1u && led_lit(14u + 22u) &&
-          !led_lit(14u + 20u));
+    glo_key(22u);                                    /* top D#: (fork) nothing now, the timing is DEVICE's */
+    check("(fork) JAM: top D# changes no timing", settings.mutebar == 0u);
+    turn(EN_K2, 5);
+    a = (uint32_t)trk[0].p[P_E1];
+    glo_hold_frames(1);
+    check("JAM: the knobs edit nothing under it (they are the PERFORM macros: fork)", (uint32_t)trk[0].p[P_E1] == a &&
+          perf_k[1] > 0);
+    perf_k[1] = 0;
+    release_all();
+    ui_frame();
+    check("GLO let go: the peek gone, HOME as before (no page: not a tap)", !ui.mute && ui.home);
+    settings.mutebar = 1;                            /* NEXT BAR, JAM latched, playing */
+    tap(B_GLO);
     transport_req = 1;
     seq_play_to(0, 2);
-    glo_key(KEY_TRK_KEY[0]);
+    latch_key(KEY_TRK_KEY[0]);
     check("NEXT BAR while playing: track 1's mute waits for the bar", trk[0].p[P_MUTE] == 0 && (song.mute_q & 1u));
-    host_ticks += 250u * 1000u * FM1_TICKS_PER_US;
-    glo_hold_frames(1);
-    l1 = led_lit(14u + KEY_TRK_KEY[0]);
-    a = mute_box_filled(0);
-    host_ticks += 250u * 1000u * FM1_TICKS_PER_US;
-    glo_hold_frames(1);
-    l2 = led_lit(14u + KEY_TRK_KEY[0]);
-    check("the waiting mute blinks (key LED and box, 250 ms)", l1 != l2 && a != (uint32_t)mute_box_filled(0));
-    for (k = 0; k < 400u && mute_box_filled(0); k++)  /* the screenshot in the outline phase */
-        glo_hold_frames(1);
+    l1 = l2 = 0;
+    for (k = 3; k < 15u; k++) {                      /* (fork) the waiting key blinks with PLAY, on the beat */
+        seq_play_to(0, k);
+        ui_frame();
+        if (led_lit(14u + KEY_TRK_KEY[0]) == jam_beat())
+            l1 |= led_lit(14u + KEY_TRK_KEY[0]) ? 1u : 2u;
+        else
+            l2 = 1;
+    }
+    check("(fork) the waiting mute's key blinks on the beat (with PLAY), the tile hatched", l1 == 3u && !l2 &&
+          mute_box_filled(0));
     shot("build/ui_shots/fixes/mute_waiting.ppm");
     seq_play_to(0, 0);
+    ui_frame();
     check("at the bar: track 1 muted", trk[0].p[P_MUTE] == 1 && !song.mute_q);
-    glo_key(20u);                                    /* top C# */
-    check("MUTE screen: top C# = NOW", settings.mutebar == 0u);
-    turn(EN_K2, 5);
-    a = (uint32_t)trk[0].p[P_E1];
-    glo_hold_frames(1);
-    check("MUTE screen: the knobs edit nothing under it", (uint32_t)trk[0].p[P_E1] == a);
-    release_all();
-    ui_frame();
-    check("GLO let go: the screen gone, HOME as before (no GLOBAL page: not a tap)", !ui.mute && ui.home);
+    jam_leave();
     transport_req = 2;
     ui_frame();
     settings.mutebar = 0;
-}
-
-/* fork (Meat Proxy): MENU > MUTE SCREEN LATCH. GLO held then let go: the MUTE screen stays up and the white keys toggle
- * the mutes with GLO up (no note, no select); the next GLO press closes it and is spent (no GLOBAL page, no screen while
- * held); OCT- closes it too; a GLO tap still opens GLOBAL; HOLD (the default) as before; the setting is in the menu */
-static int menu_value_is(uint32_t row, const char *s, int sel);
-static void latch_key_tap(uint32_t key)              /* a key tapped with no button held */
-{
-    keys(1u << key);
-    ui_frame();
-    ui_frame();
-    keys(0);
-    ui_frame();
-}
-static void test_mute_latch(void)
-{
-    uint32_t a, sel, k;
-    ui_host_init();
-    settings.mutebar = 0;
-    check("MUTE SCREEN: HOLD by default", mutelatch == 0u);
-    ui.menu = 1;                                     /* the menu row: OCT+ toggles HOLD / LATCH */
-    ui.menu_sel = MI_MUTE;
-    ui.force = 1;
-    ui_frame();
-    check("menu: the MUTE SCREEN row shows HOLD", str_eq(MI_NAME[MI_MUTE], "MUTE SCREEN") && menu_value_is(MI_MUTE, "HOLD", 1));
-    tap(B_OCTUP);
-    ui.force = 1;
-    ui_frame();
-    check("menu: OCT+ on MUTE SCREEN = LATCH", mutelatch == 1u && ui.menu == 1 && menu_value_is(MI_MUTE, "LATCH", 1));
-    snap_page("fixes/menu_mute_latch");
-    ui.menu = 0;
-    ui.force = 1;
-    go_home();
-    ui_frame();
-
-    press(B_GLO);                                    /* a tap: GLOBAL, as before */
-    ui_frame();
-    release_all();
-    ui_frame();
-    check("LATCH: a GLO tap still opens GLOBAL, no screen", !ui.home && cur_fam() == FAM_GLO && !ui.mute && !mute_latched);
-    tap(B_HOME);
-
-    press(B_GLO);                                    /* held 0.4 s, let go: latched */
-    glo_hold_frames(450);
-    check("LATCH: GLO held 0.4 s opens the MUTE screen", ui.mute && !mute_latched);
-    release_all();
-    ui_frame();
-    check("LATCH: GLO let go, the screen stays (latched), no GLOBAL page", ui.mute && mute_latched && ui.home);
-    snap_page("fixes/mute_latched");
-
-    a = hit_age(&trk[2]);
-    sel = song.sel;
-    latch_key_tap(KEY_TRK_KEY[2]);
-    check("LATCH: key 3 with GLO up mutes track 3; no sound, no select",
-          trk[2].p[P_MUTE] == 1 && hit_age(&trk[2]) == a && song.sel == sel && !led_lit(14u + KEY_TRK_KEY[2]));
-    latch_key_tap(KEY_TRK_KEY[2]);
-    check("LATCH: key 3 again unmutes it", trk[2].p[P_MUTE] == 0 && hit_age(&trk[2]) == a);
-    latch_key_tap(22u);
-    check("LATCH: top D# = NEXT BAR with GLO up", settings.mutebar == 1u);
-    transport_req = 1;
-    seq_play_to(0, 2);
-    latch_key_tap(KEY_TRK_KEY[0]);
-    check("LATCH, NEXT BAR, playing: track 1's mute waits for the bar", trk[0].p[P_MUTE] == 0 && (song.mute_q & 1u));
-    seq_play_to(0, 0);
-    check("LATCH: at the bar, track 1 muted; still latched", trk[0].p[P_MUTE] == 1 && ui.mute && mute_latched);
-    turn(EN_K2, 5);
-    a = (uint32_t)trk[0].p[P_E1];
-    ui_frame();
-    check("LATCH: the knobs edit nothing under it", (uint32_t)trk[0].p[P_E1] == a);
-
-    press(B_GLO);                                    /* GLO again: closed, and spent */
-    ui_frame();
-    check("LATCH: a GLO press closes the screen", !ui.mute && !mute_latched);
-    a = hit_age(&trk[4]);
-    keys(1u << KEY_TRK_KEY[4]);                      /* a key struck while that GLO is still held: nothing */
-    glo_hold_frames(450);
-    check("LATCH: the closing GLO held on: no screen again, the key toggles nothing", !ui.mute && trk[4].p[P_MUTE] == 0);
-    keys(0);
-    release_all();
-    ui_frame();
-    check("LATCH: the closing GLO let go: no GLOBAL page, HOME as before", ui.home && !ui.mute && !mute_latched);
-    a = hit_age(&trk[1]);
-    sel = song.sel;
-    for (k = 0; k < 3u; k++)
-        ui_frame();
-
-    settings.mutebar = 0;                            /* (NOW: the toggle lands at once, the transport running) */
-    press(B_GLO);                                    /* GLO + a key: latched too on the release */
-    keys(1u << KEY_TRK_KEY[5]);
-    glo_hold_frames(2);
-    keys(0);
-    glo_hold_frames(1);
-    release_all();
-    ui_frame();
-    check("LATCH: GLO with a key, let go: track 6 muted, the screen latched", trk[5].p[P_MUTE] == 1 && ui.mute && mute_latched);
-    tap(B_OCTDN);
-    check("LATCH: OCT- closes the screen", !ui.mute && !mute_latched && ui.home);
-    latch_key_tap(KEY_TRK_KEY[5]);
-    check("after the latch: a key is the drum's again (track 6 still muted, the key no mute toggle)", trk[5].p[P_MUTE] == 1);
-    trk[5].p[P_MUTE] = 0;
-    trk[0].p[P_MUTE] = 0;
-
-    mutelatch = 0;                                   /* HOLD: let go, the screen goes (as before) */
-    press(B_GLO);
-    glo_hold_frames(450);
-    release_all();
-    ui_frame();
-    check("HOLD: GLO let go, the screen gone", !ui.mute && !mute_latched && ui.home);
-    transport_req = 2;
-    ui_frame();
-    settings.mutebar = 0;
-}
-
-/* (bug report 2026-10-30) playing, MENU > MUTE SCREEN LATCH, latch, toggle, then PLAY / STOP: PLAY stopped
- * working. Cause: G4 (next to track 8's F4) toggled MIDI LEARN with GLO up, and with LEARN on PLAY is picked as its
- * target instead of playing. Latched, G4 does nothing; GLO held + G4 still toggles LEARN */
-static void test_mute_latch_play(void)
-{
-    uint32_t k;
-    ui_host_init();
-    settings.mutebar = 0;
-    kit_session();
-    transport_req = 1;
-    seq_play_to(0, 2);
-    hold(B_HOME);                                    /* the menu, while playing */
-    for (k = 0; k < MI_MUTE; k++) { turn(EN_SELECT, 1); ui_frame(); }
-    tap(B_OCTUP);
-    check("(bug) menu while playing: MUTE SCREEN set to LATCH", ui.menu && ui.menu_sel == MI_MUTE && mutelatch == 1u && song.playing);
-    hold(B_HOME);
-    press(B_GLO);
-    glo_hold_frames(450);
-    release_all();
-    ui_frame();
-    latch_key_tap(KEY_TRK_KEY[1]);
-    latch_key_tap(KEY_TRK_KEY[1]);
-    check("(bug) latched while playing, track 2 toggled twice", mute_latched && song.playing && trk[1].p[P_MUTE] == 0);
-    latch_key_tap(KEY_LEARN);                        /* G4 brushed */
-    check("(bug) latched: G4 brushed leaves MIDI LEARN off", !ui.ml.on && mute_latched);
-    snap_page("fixes/mute_latched_g4");
-    tap(B_PLAY);
-    for (k = 0; k < 20u; k++) ui_frame();
-    check("(bug) latched: PLAY stops", !song.playing);
-    tap(B_PLAY);
-    for (k = 0; k < 20u; k++) ui_frame();
-    check("(bug) latched: PLAY starts again", song.playing);
-    tap(B_OCTDN);
-    tap(B_PLAY);
-    for (k = 0; k < 20u; k++) ui_frame();
-    check("(bug) unlatched: PLAY stops", !song.playing);
-    tap(B_PLAY);                                     /* (hotfix) LATCH, playing: a GLO tap latches, no GLOBAL page */
-    for (k = 0; k < 20u; k++) ui_frame();
-    tap(B_GLO);
-    ui_frame();
-    check("(hotfix) LATCH, playing: a GLO tap latches the MUTE screen, no GLOBAL page",
-          song.playing && ui.mute && mute_latched && cur_fam() != FAM_GLO);
-    tap(B_OCTDN);
-    mutelatch = 0;                                   /* HOLD: the tap opens GLOBAL; CLK refused while playing */
-    tap(B_GLO);
-    ui_frame();
-    {
-        int16_t clk = song.g[G_CLOCK];
-        turn(EN_K3, 3);
-        ui_frame();
-        check("(hotfix) playing: CLK refused (STOP TO CHANGE CLK), the set plays on",
-              cur_fam() == FAM_GLO && song.g[G_CLOCK] == clk && song.playing && str_eq(ui.msg, "STOP TO CHANGE CLK"));
-    }
-    mutelatch = 1;
-    tap(B_PLAY);
-    for (k = 0; k < 20u; k++) ui_frame();
-    press(B_GLO);                                  /* GLO held + G4: LEARN as before */
-    glo_hold_frames(450);
-    glo_key(KEY_LEARN);
-    check("(bug) GLO held + G4 still turns MIDI LEARN on", ui.ml.on);
-    glo_key(KEY_LEARN);
-    check("(bug) .. and off", !ui.ml.on);
-    release_all();
-    ui_frame();
-    tap(B_OCTDN);                                    /* (latched again by the hold: close it) */
-    transport_req = 2;
-    ui_frame();
-    mutelatch = 0;
-}
-
-/* performer v2, phase 1: the latched MUTE screen self-contained. Black keys 1-8 queue variations (LEDs as HOME's),
- * A4 held = a fill, KNOB 1-4 = the PERFORM macros, OCT+ held 1 s clears them, the FX LED lit while one is on */
-static void latch_frames(uint32_t n, uint32_t extra_buttons)
-{
-    uint32_t i;
-    for (i = 0; i < n; i++) {
-        fm1_in.buttons |= extra_buttons;
-        ui_frame();
-    }
-}
-static void test_latch_v2_phase1(void)
-{
-    uint32_t k, a;
-    ui_host_init();
-    settings.mutebar = 0;
-    kit_session();
-    song.rec = 0;
-    project_save(0);                                 /* (cues need a saved slot) */
-    mutelatch = 1;
-    transport_req = 1;
-    seq_play_to(0, 2);
-    press(B_GLO);
-    glo_hold_frames(450);
-    release_all();
-    ui_frame();
-    check("v2: latched while playing", mute_latched && ui.mute && song.playing);
-    latch_key_tap(CUE_BK[2]);                        /* black key 3 */
-    check("v2: latched, black key 3 queues variation 3", cue.q_var == 3u && var_cur == 0u);
-    for (k = 0; k < 6000u && var_cur != 2u; k++)
-        ui_frame();
-    check("v2: .. it comes in where the pattern ends, still latched", var_cur == 2u && !cue.q_var && mute_latched);
-    ui_frame();
-    check("v2: the playing variation's black key lit", led_lit(14u + CUE_BK[2]) && !led_lit(14u + CUE_BK[0]));
-    latch_key_tap(CUE_BK[0]);
-    latch_key_tap(CUE_BK[0]);                        /* again: at the next step */
-    for (k = 0; k < 2000u && var_cur != 0u; k++)
-        ui_frame();
-    check("v2: black key 1 twice: back to variation 1 at the next step", var_cur == 0u);
-    a = trk[0].p[P_MUTE];
-    keys(1u << KEY_FILL);                            /* A4 held (longer than a tap) */
-    latch_frames(150, 0);
-    check("v2: A4 held: a fill, no mute toggled, no note", (fill_on & FILL_KEY) && trk[0].p[P_MUTE] == (int16_t)a);
-    snap_page("fixes/latch_v2_fill");
-    keys(0);
-    latch_frames(2, 0);
-    check("v2: A4 let go after a hold: the fill ends", !fill_on);
-    turn(EN_K1, 6);
-    ui_frame();
-    turn(EN_K1 + 1, 3);
-    ui_frame();
-    check("v2: latched, KNOB 1 / 2 move FILTER / CRUSH", perf_k[0] > 0 && perf_k[1] > 0 && mute_latched);
-    ui_frame();
-    check("v2: the FX button lit while a macro is on", led_on(panel.btn[B_FX]));
-    snap_page("fixes/latch_v2_fx_on");
-    press(B_OCTUP);
-    latch_frames(120, 1u << panel.btn[B_OCTUP]);     /* (the host clock: 1 ms a read, a few reads a frame) */
-    check("v2: OCT+ held briefly: nothing yet", perf_macros_on());
-    latch_frames(600, 1u << panel.btn[B_OCTUP]);
-    release_all();
-    ui_frame();
-    check("v2: OCT+ held 1 s: the macros back to 0, FX unlit, still latched",
-          !perf_macros_on() && !led_on(panel.btn[B_FX]) && mute_latched);
-    tap(B_OCTDN);
-    turn(EN_K1, 4);                                   /* not latched, on HOME: the knob is the page's, no macro */
-    ui_frame();
-    check("v2: unlatched, KNOB 1 no macro", perf_k[0] == 0);
-    transport_req = 2;
-    ui_frame();
-    mutelatch = 0;
-    perf_k[0] = perf_k[1] = perf_k[2] = perf_k[3] = 0;
-    memset(&proj_slot[0], 0, sizeof proj_slot[0]);
-}
-
-/* performer v2, phase 2: REC asks before it starts recording while playing in LATCH mode; the bar strip */
-static int strip_pip_lit(uint32_t k)                /* the bar strip's pip k filled (its centre), screen y 146.. */
-{
-    return fb[(146u + 9u) * 240u + 12u + k * 11u + 4u] == C_INK;
-}
-static void test_latch_v2_phase2(void)
-{
-    uint32_t k, lit, ok;
-    ui_host_init();
-    settings.mutebar = 0;
-    kit_session();
-    song.rec = 0;
-    mutelatch = 1;
-    transport_req = 1;
-    seq_play_to(0, 2);
-    tap(B_HOME);
-    if (mix_mode())
-        tap(B_HOME);                                 /* (HOME mode, not TRACKS: a tap there is REC ALL) */
-    tap(B_REC);
-    check("v2: LATCH, playing: a REC tap only asks", !ui.rec_all && song.rec == 0u);
-    tap(B_REC);
-    check("v2: .. a second tap starts REC ALL", ui.rec_all && song.rec != 0u);
-    tap(B_REC);
-    check("v2: .. ending it needs one tap", !ui.rec_all && song.rec == 0u);
-    transport_req = 2;
-    ui_frame();
-    tap(B_REC);
-    check("v2: stopped: one tap, as before", ui.rec_all);
-    tap(B_REC);
-    mutelatch = 0;
-    transport_req = 1;
-    seq_play_to(0, 2);
-    tap(B_REC);
-    check("v2: HOLD, playing: one tap, as before", ui.rec_all);
-    tap(B_REC);
-    mutelatch = 1;
-    press(B_GLO);
-    glo_hold_frames(450);
-    release_all();
-    ui_frame();
-    ok = 1;
-    for (k = 0; k < 3u; k++) {                       /* the lit pip follows the bar's sixteenth */
-        uint32_t i, want;
-        for (i = 0; i < 400u && bar16() == (want = bar16()); i++)
-            ui_frame();
-        ui_frame();
-        want = bar16();
-        lit = strip_pip_lit(want);
-        ok &= lit;
-        if (!lit)
-            printf("     pip %u not lit\n", want);
-    }
-    check("v2: the bar strip lights the sixteenth playing", ok);
-    snap_page("fixes/latch_v2_strip");
-    tap(B_OCTDN);
-    transport_req = 2;
-    ui_frame();
-    mutelatch = 0;
-}
-
-/* performer v2, phase 3: MUTE PTN END (F#5 latched, GLOBAL 3/3's third value) lands where the pattern ends, as a
- * cue; NEXT BAR's bars start again at a cue's switch; A4 tapped latches a fill to the pattern's end */
-static void all_len(uint32_t len)
-{
-    uint32_t k;
-    for (k = 0; k < NTRK; k++)
-        trk[k].p[P_SLEN] = (int16_t)len;
-}
-static void test_latch_v2_phase3(void)
-{
-    uint32_t k, ok;
-    ui_host_init();
-    settings.mutebar = 1;
-    kit_session();
-    song.rec = 0;
-    all_len(12);                                     /* a 12-step pattern: its ends are not NEXT BAR's bars */
-    project_save(0);
-    mutelatch = 1;
-    transport_req = 1;
-    seq_play_to(0, 2);
-    press(B_GLO);
-    glo_hold_frames(450);
-    release_all();
-    ui_frame();
-    latch_key_tap(KEY_PTN);
-    check("v2: latched, top F# = PTN END (setting, LED, GLOBAL knob value)",
-          settings.mutebar == 2u && led_lit(14u + KEY_PTN) && !led_lit(14u + 20u) && song.act[2] == 2);
-    snap_page("fixes/latch_v2_ptn");
-    seq_play_to(0, 3);
-    latch_key_tap(KEY_TRK_KEY[1]);
-    check("v2: PTN END: a mute waits", (song.mute_q & 2u) && trk[1].p[P_MUTE] == 0);
-    ok = 1;
-    for (k = 0; k < 4000u && song.mute_q; k++) {
-        ui_frame();
-        if (song.mute_q == 0u && trk[0].seq_idx > 1u)
-            ok = 0;                                  /* it landed somewhere other than the pattern's start */
-    }
-    check("v2: PTN END: it lands as the 12-step pattern starts again", trk[1].p[P_MUTE] == 1 && ok &&
-          trk[0].seq_idx <= 1u);
-    latch_key_tap(KEY_TRK_KEY[1]);
-    for (k = 0; k < 4000u && song.mute_q; k++)
-        ui_frame();
-    latch_key_tap(21u - 1u);                         /* (C#5 is key 20) */
-    check("v2: top C#: NOW again", settings.mutebar == 0u);
-    latch_key_tap(22u);
-    check("v2: top D#: NEXT BAR", settings.mutebar == 1u);
-    /* NEXT BAR after a cue: the bars start again with the new pattern */
-    latch_key_tap(CUE_BK[1]);                        /* variation 2 (a copy) */
-    for (k = 0; k < 4000u && var_cur != 1u; k++)
-        ui_frame();
-    all_len(16);                                     /* variation 2: 16 steps */
-    latch_key_tap(CUE_BK[0]);                        /* .. then back to variation 1 (12 steps) at its end */
-    for (k = 0; k < 4000u && var_cur != 0u; k++)
-        ui_frame();
-    for (k = 0; k < 400u && trk[0].seq_idx != 1u; k++)
-        ui_frame();
-    check("v2: after a cue the bar counts from the new pattern's step 0", var_cur == 0u && bar16() <= 1u);
-    for (k = 0; k < 4000u && trk[0].seq_idx != 11u; k++)
-        ui_frame();
-    check("v2: 12 steps on, the bar is at its 12th sixteenth, not 0", bar16() >= 10u && bar16() <= 12u);
-    /* A4 tapped: a fill to the pattern's end */
-    latch_key_tap(KEY_FILL);
-    ui_frame();                                      /* (the release reaches the UI a frame later) */
-    check("v2: A4 tapped: a latched fill", (fill_on & FILL_LATCH) != 0u);
-    snap_page("fixes/latch_v2_fill_latch");
-    for (k = 0; k < 6000u && (fill_on & FILL_LATCH); k++)
-        ui_frame();
-    check("v2: .. it ends where the pattern ends", !fill_on && trk[0].seq_idx <= 1u);
-    latch_key_tap(KEY_FILL);
-    ui_frame();
-    latch_key_tap(KEY_FILL);
-    ui_frame();
-    check("v2: A4 tapped twice: no fill", !fill_on);
-    latch_key_tap(KEY_FILL);
-    ui_frame();
-    transport_req = 2;
-    ui_frame();
-    check("v2: STOP ends a latched fill", !fill_on);
-    tap(B_OCTDN);
-    settings.mutebar = 0;
-    mutelatch = 0;
-    memset(&proj_slot[0], 0, sizeof proj_slot[0]);
-}
-
-/* performer v2, phase 4: the jam snapshot. Taken by itself at the first latch after a STOP; F5 held 1 s stores;
- * F5 tapped recalls the mutes (and the variation) as the mode says; G5 opens every track; a second tap cancels */
-static void test_latch_v2_phase4(void)
-{
-    uint32_t k;
-    ui_host_init();
-    settings.mutebar = 1;
-    kit_session();
-    song.rec = 0;
-    for (k = 0; k < NTRK; k++)
-        trk[k].p[P_MUTE] = k >= 2u;                  /* only T1, T2 heard */
-    project_save(0);
-    mutelatch = 1;
-    jam_snap.valid = 0;
-    jam_snap.armed = 1;
-    transport_req = 1;
-    seq_play_to(0, 2);
-    press(B_GLO);
-    glo_hold_frames(450);
-    release_all();
-    ui_frame();
-    check("v2: the first latch after PLAY takes the snapshot (T1, T2 heard)", jam_snap.valid && jam_snap.mutes == 0xFCu);
-    latch_key_tap(KEY_OPEN);
-    check("v2: G5: every track open, queued (NEXT BAR)", song.mute_q == 0xFCu);
-    latch_key_tap(KEY_OPEN);
-    check("v2: G5 again before the bar: cancelled", song.mute_q == 0u);
-    latch_key_tap(KEY_OPEN);
-    for (k = 0; k < 4000u && song.mute_q; k++)
-        ui_frame();
-    check("v2: .. it lands: all open", mutes_now() == 0u);
-    latch_key_tap(KEY_TRK_KEY[7]);
-    for (k = 0; k < 4000u && song.mute_q; k++)
-        ui_frame();
-    keys(1u << KEY_SNAP);                            /* F5 held 1 s: store (T8 muted) */
-    latch_frames(450, 0);
-    keys(0);
-    latch_frames(3, 0);
-    check("v2: F5 held: SNAP STORED (T8 muted)", jam_snap.mutes == 0x80u && str_eq(ui.msg, "SNAP STORED"));
-    latch_key_tap(KEY_TRK_KEY[0]);
-    latch_key_tap(KEY_TRK_KEY[1]);
-    for (k = 0; k < 4000u && song.mute_q; k++)
-        ui_frame();
-    check("(T1, T2 muted too)", mutes_now() == 0x83u);
-    latch_key_tap(KEY_SNAP);
-    ui_frame();
-    check("v2: F5 tapped: the snapshot queued", song.mute_q == 0x03u);
-    for (k = 0; k < 4000u && song.mute_q; k++)
-        ui_frame();
-    check("v2: .. it lands: back to the snapshot", mutes_now() == 0x80u);
-    latch_key_tap(KEY_TRK_KEY[3]);                    /* NOW mode: at once */
-    for (k = 0; k < 4000u && song.mute_q; k++)
-        ui_frame();
-    latch_key_tap(20u);
-    latch_key_tap(KEY_SNAP);
-    ui_frame();
-    check("v2: NOW: F5 restores at once", mutes_now() == 0x80u && !song.mute_q);
-    tap(B_OCTDN);
-    transport_req = 2;
-    ui_frame();
-    for (k = 0; k < NTRK; k++)
-        trk[k].p[P_MUTE] = 0;
-    settings.mutebar = 0;
-    mutelatch = 0;
-    memset(&proj_slot[0], 0, sizeof proj_slot[0]);
 }
 
 /* Review focus 1: keys with GLO never play or record; GLO let go with a key held leaves nothing stuck */
@@ -2144,14 +1721,14 @@ static void test_mute_screen_keys(void)
     glo_hold_frames(100);
     release_all();
     ui_frame();
-    check("GLO held 0.1 s alone: a tap, GLOBAL", !ui.home && cur_fam() == FAM_GLO && !ui.mute);
-    tap(B_HOME);
+    check("GLO held 0.1 s alone: a tap, JAM latched (fork)", ui.home && ui.mute && mute_latched);
+    jam_leave();
     press(B_GLO);
     glo_hold_frames(2);
     glo_key(KEY_TRK_KEY[1]);
     release_all();
     ui_frame();
-    check("GLO with a key, let go quickly: no GLOBAL page (not a tap)", ui.home && trk[1].p[P_MUTE] == 1);
+    check("GLO with a key, let go quickly: not a tap (no latch)", ui.home && !ui.mute && trk[1].p[P_MUTE] == 1);
     trk[1].p[P_MUTE] = 0;
     ui_frame();
     a = hit_age(&trk[0]);                            /* the ISR before the UI's pass sees GLO */
@@ -2307,6 +1884,177 @@ static void test_save_dead(void)
     ui_frame();
     trk[4].p[P_MUTE] = 0;
 }
+
+/* fork (Meat Proxy): JAM, the performance screen (firmware/src/jam.c; docs/PLAN_performer_v3.md). One timing rule,
+ * OCT+ now / OCT- cancel, SNAP, OPEN, FILL held only, STOP cancels, FX tap clears / FX held layers over it, SELECT BPM,
+ * REC and the page buttons dead, SAVE held the cue map, the title says what waits */
+static void jam_frames(uint32_t n, uint32_t buttons, uint32_t keybits)
+{
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        fm1_in.buttons |= buttons;
+        keys(keybits);
+        ui_frame();
+    }
+}
+static int title_inverted(void) { return fb[(16u + 5u) * 240u + 60u] == C_INK; }   /* the title band's message */
+static void test_jam(void)
+{
+    uint32_t k, up = 1u << panel.btn[B_OCTUP];
+    int16_t bpm;
+    ui_host_init();
+    settings.mutebar = 1;                            /* NEXT BAR */
+    kit_session();
+    song.rec = 0;
+    for (k = 0; k < NTRK; k++)
+        trk[k].p[P_MUTE] = 0;
+    project_save(0);                                 /* (variations need a saved slot) */
+    tap(B_GLO);
+    check("JAM: open, a snapshot taken by itself (all open, V1)", ui.mute && mute_latched && jam.valid &&
+          jam.mutes == 0u && jam.var == 0u);
+    transport_req = 1;
+    seq_play_to(0, 2);
+    latch_key(KEY_TRK_KEY[1]);
+    latch_key(KEY_TRK_KEY[2]);
+    check("BAR: T2 T3 wait; the title says T2 T3 > BAR", song.mute_q == 6u && !trk[1].p[P_MUTE]);
+    {
+        char b[28];
+        jam_status(b, sizeof b);
+        check("..jam_status: T2 T3 > BAR", str_eq(b, "T2 T3 > BAR"));
+    }
+    snap_page("fixes/jam_waiting");
+    tap(B_OCTUP);
+    check("OCT+ tapped: everything waiting lands now (NOW)", trk[1].p[P_MUTE] && trk[2].p[P_MUTE] && !song.mute_q &&
+          str_eq(ui.msg, "NOW"));
+    ui_frame();
+    check("..the message drawn in the title band, inverted", title_inverted());
+    latch_key(KEY_TRK_KEY[1]);
+    check("T2 again: waits to open", (song.mute_q & 2u) && trk[1].p[P_MUTE]);
+    tap(B_OCTDN);
+    check("OCT- tapped: cancelled; T2 still muted", !song.mute_q && trk[1].p[P_MUTE] && str_eq(ui.msg, "CANCELLED"));
+    press(B_OCTUP);
+    jam_frames(2, up, 1u << KEY_TRK_KEY[3]);
+    jam_frames(2, up, 0);
+    check("OCT+ held + T4: T4 muted now, nothing waits", trk[3].p[P_MUTE] && !song.mute_q);
+    release_all();
+    ui_frame();
+    check("..OCT+ let go after a key: nothing more (no NOW)", !str_eq(ui.msg, "NOW") || ui.msg_t == 0);
+    latch_key(KEY_OPEN);
+    check("G5: every track waits to open (T2 T3 T4)", song.mute_q == 0x0Eu && str_eq(ui.msg, "ALL OPEN"));
+    latch_key(KEY_OPEN);
+    check("G5 again: the same, not a cancel", song.mute_q == 0x0Eu);
+    tap(B_OCTDN);
+    latch_key(CUE_BK[2]);
+    check("a black key: V3 queued for the pattern's end", cue.q_var == 3u && !cue.now);
+    latch_key(CUE_BK[2]);
+    check("..again: no change (no jump at the next step)", cue.q_var == 3u && !cue.now);
+    tap(B_OCTDN);
+    check("OCT- cancels the queued variation too", !cue.q_var);
+    press(B_OCTUP);
+    jam_frames(2, up, 1u << CUE_BK[1]);
+    jam_frames(2, up, 0);
+    check("OCT+ held + a black key: at the next step", (cue.q_var == 2u && cue.now) || var_cur == 1u);
+    release_all();
+    for (k = 0; k < 40u && var_cur != 1u; k++) {
+        seq_play_to(0, (2u + k) % 16u);
+        ui_frame();
+    }
+    check("..switched to V2", var_cur == 1u);
+    /* SNAP: tap back; held 1 s stores (a bar fills); let go between: nothing */
+    hold_ms(0, 1u << KEY_SNAP, 500);
+    check("F5 held 0.5 s: the title fills (STORING SNAP), nothing stored yet", jam_store_frac(fm1_ticks()) >= 1u &&
+          jam.var == 0u);
+    snap_page("fixes/jam_storing");
+    keys(0);
+    ui_frame();
+    ui_frame();
+    ui_frame();
+    check("F5 let go at 0.5 s: nothing; HOLD 1 S TO STORE", jam.var == 0u && str_eq(ui.msg, "HOLD 1 S TO STORE"));
+    hold_ms(0, 1u << KEY_SNAP, 1100);
+    keys(0);
+    ui_frame();
+    ui_frame();
+    check("F5 held 1 s: stored (T2 T3 T4 muted, V2)", jam.var == 1u && jam.mutes == 0x0Eu);
+    latch_key(KEY_OPEN);
+    tap(B_OCTUP);
+    check("(all open now)", mutes_now() == 0u);
+    latch_key(KEY_SNAP);
+    check("F5 tapped: back to the snapshot, waiting for the bar", song.mute_q == 0x0Eu && str_eq(ui.msg, "BACK TO SNAP"));
+    transport_req = 2;
+    ui_frame();
+    render_mix(0, 0, CTL);
+    ui_frame();
+    check("STOP: what waited is cancelled", !song.mute_q && !cue.q_var);
+    jam_leave();
+    tap(B_GLO);
+    check("JAM again after a STOP: the stored snapshot kept (not taken again)", jam.var == 1u && jam.mutes == 0x0Eu);
+    /* FILL: held only */
+    jam_frames(5, 0, 1u << KEY_FILL);
+    check("A4 held: a fill", (fill_on & FILL_KEY) != 0u);
+    keys(0);
+    ui_frame();
+    ui_frame();
+    check("A4 let go: no fill (a tap latches nothing)", !fill_on);
+    /* the knobs, FX, SELECT, REC, the page buttons, SAVE */
+    turn(EN_K1, 4);
+    ui_frame();
+    check("KNOB 1: FILTER", perf_k[0] != 0 && perf_macros_on());
+    snap_page("fixes/jam_fx_on");
+    tap(B_FX);
+    check("FX tapped in JAM: the macros back to 0 (FX CLEARED), JAM stays", !perf_macros_on() && ui.mute &&
+          str_eq(ui.msg, "FX CLEARED"));
+    press(B_FX);
+    fx_hold_frames(500);
+    check("FX held in JAM: PERFORM's layer over it", ui.layer && ui.mute);
+    release_all();
+    ui_frame();
+    ui_frame();
+    check("FX let go: JAM again", !ui.layer && ui.mute && mute_latched);
+    bpm = song.g[G_BPM];
+    turn(EN_SELECT, 2);
+    ui_frame();
+    check("SELECT: the tempo (BPM n)", song.g[G_BPM] > bpm && ui.msg[0] == 'B');
+    song.g[G_BPM] = bpm;
+    tap(B_REC);
+    tap(B_SEQ);
+    tap(B_EDIT);
+    check("REC, SEQ, EDIT: nothing but HOLD GLO TO LEAVE", ui.mute && !song.rec && ui.home &&
+          str_eq(ui.msg, "HOLD GLO TO LEAVE"));
+    tap(B_SAVE);
+    check("SAVE tapped: no page under JAM", ui.mute && ui.home);
+    press(B_SAVE);
+    for (k = 0; k < 500u; k++) {
+        fm1_in.buttons |= save_bit();
+        ui_frame();
+    }
+    check("SAVE held in JAM: the cue map", ui.cue_map && ui.mute);
+    release_all();
+    ui_frame();
+    jam_leave();
+    /* MIDI LEARN: DEVICE's KNOB 4; JAM ends it */
+    for (k = 0; k < 8u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
+        tap(B_SAVE);
+    turn(EN_K4, 1);
+    ui_frame();
+    check("DEVICE KNOB 4: MIDI LEARN on", ui.ml.on && str_eq(page_desc(cur_page(), 3, &(int16_t *){0})->label, "LEARN"));
+    tap(B_GLO);
+    check("JAM opened: MIDI LEARN off (PLAY stays PLAY)", ui.mute && !ui.ml.on);
+    tap(B_PLAY);
+    for (k = 0; k < 20u; k++)
+        ui_frame();
+    check("JAM: PLAY starts", song.playing);
+    jam_leave();
+    /* CLK: refused while playing */
+    for (k = 0; k < 8u && (ui.home || cur_page()->id[2] != G_CLOCK); k++)
+        tap(B_SAVE);
+    turn(EN_K3, 2);
+    ui_frame();
+    check("GLOBAL, playing: CLK refused (STOP TO CHANGE CLK)", song.g[G_CLOCK] == 0 && song.playing &&
+          str_eq(ui.msg, "STOP TO CHANGE CLK"));
+    transport_req = 2;
+    ui_frame();
+    settings.mutebar = 0;
+}
 static void test_mute_screen_refused(void)
 {
     uint32_t i;
@@ -2355,7 +2103,7 @@ static void test_mute_screen_refused(void)
     check("PERFORM layer: no MUTE screen", ui.layer && !ui.mute);
     release_all();
     ui_frame();
-    check("PERFORM layer: GLO a plain button there (its release opens GLOBAL)", !ui.home && cur_fam() == FAM_GLO);
+    check("PERFORM layer: GLO a plain button there (its release: nothing, fork)", ui.home && !ui.mute);
     press(B_GLO);
     glo_hold_frames(450);
     press(B_FX);
@@ -2367,8 +2115,7 @@ static void test_mute_screen_refused(void)
     release_all();
     ui_frame();
     ui_frame();
-    check("all let go: neither, no page change (not a tap)", !ui.mute && !ui.layer && cur_fam() == FAM_GLO &&
-          ui.page == page_first(FAM_GLO));
+    check("all let go: neither, no page change (not a tap)", !ui.mute && !ui.layer && ui.home);
 }
 
 /* HOME's TRACKS mode while a track is armed: the white keys play (and record) their tracks instead of the steps; REC
@@ -2581,8 +2328,14 @@ static void test_copy_page(void)
     OK0(d && str_eq(d->label, "PASTE") && v && *v == 0);
     snap_page("fixes/save_copy_page");
     tap(B_SAVE);
+    OK0(str_eq(cur_page()->title, "GLOBAL"));
+    tap(B_SAVE);
+    OK0(str_eq(cur_page()->title, "SYSTEM"));
+    tap(B_SAVE);
+    OK0(str_eq(cur_page()->title, "DEVICE"));
+    tap(B_SAVE);
     OK0(str_eq(cur_page()->title, "PROJECT"));
-    check("SAVE taps: PROJECT, TOOLS, COPY (SLOT, COPY, PASTE), PROJECT again", (int)ok);
+    check("SAVE taps: PROJECT, TOOLS, COPY (SLOT, COPY, PASTE), GLOBAL, SYSTEM, DEVICE (fork), PROJECT again", (int)ok);
 }
 static void test_rec_all(void)
 {
@@ -2841,10 +2594,10 @@ static void test_global_mute_setting(void)
     uint32_t k;
     ui_host_init();
     settings.mutebar = 0;
-    for (k = 0; k < 6u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
-        tap(B_GLO);
-    check("GLO reaches GLOBAL 3/3 with MUTE", !ui.home && str_eq(cur_page()->title, "GLOBAL") &&
-                                                  cur_page()->id[0] == G_MUTEBAR && ui.page == page_first(FAM_GLO) + 2u);
+    for (k = 0; k < 8u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
+        tap(B_SAVE);
+    check("(fork) SAVE reaches DEVICE (6/6) with MUTE", !ui.home && str_eq(cur_page()->title, "DEVICE") &&
+                                                  cur_page()->id[0] == G_MUTEBAR && ui.page == page_first(FAM_SAVE) + 5u);
     turn(EN_K1, 1);
     ui_frame();
     check("GLOBAL 3/3: KNOB 1 -> BAR (the setting)", settings.mutebar == 1u);
@@ -2866,8 +2619,8 @@ static void test_global_metro_setting(void)
     static const char *const NAMES[4] = {"OFF", "LOW", "MID", "HIGH"};
     ui_host_init();
     fx_metro = 0;
-    for (k = 0; k < 6u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
-        tap(B_GLO);
+    for (k = 0; k < 8u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
+        tap(B_SAVE);
     d = page_desc(cur_page(), 1, &vp);
     check("GLOBAL 3/3: KNOB 2 is METRO, OFF", d && str_eq(d->label, "METRO") && vp && *vp == 0);
     for (k = 0; k < 4u; k++) {
@@ -2902,8 +2655,8 @@ static void test_glo_midi_settings(void)
     const char *u;
     ui_host_init();
     midi_thru = 0;
-    for (k = 0; k < 6u && (ui.home || cur_page()->id[1] != G_SYNC); k++)
-        tap(B_GLO);
+    for (k = 0; k < 8u && (ui.home || cur_page()->id[1] != G_SYNC); k++)
+        tap(B_SAVE);
     d = page_desc(cur_page(), 1, &vp);
     check("GLO SYSTEM: KNOB 2 is SYNC, OFF", d && str_eq(d->label, "SYNC") && vp == &song.g[G_SYNC] && *vp == 0);
     param_format(d, 0, v, &u);
@@ -2925,8 +2678,8 @@ static void test_glo_midi_settings(void)
     param_format(d, song.g[G_ROUTE], v, &u);
     check("ROUT: up to TRACK at the end", song.g[G_ROUTE] == 2 && str_eq(v, "TRACK"));
     snap_page("fixes/glo_system_sync_rout");
-    for (k = 0; k < 6u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
-        tap(B_GLO);
+    for (k = 0; k < 8u && (ui.home || cur_page()->id[0] != G_MUTEBAR); k++)
+        tap(B_SAVE);
     d = page_desc(cur_page(), 2, &vp);
     check("GLOBAL 3/3: KNOB 3 is THRU, OFF", d && str_eq(d->label, "THRU") && vp && *vp == 0);
     turn(EN_K3, 1);
@@ -3088,11 +2841,8 @@ static void test_backlight_leds(void)
         for (k = 0; k < NTRK; k++)
             if (!trk[k].p[P_MUTE])
                 m |= 1u << KEY_TRK_KEY[k];
-        m |= 1u << 20;                               /* top C#: MUTE NOW */
-        m |= 1u << KEY_OPEN;                         /* G5: a track to open (performer v2) */
-        if (jam_snap.valid)
-            m |= 1u << KEY_SNAP;                     /* F5: a snapshot to go back to */
-        check("BACKLIGHT ON, MUTE screen: audible tracks, the mode key, F5 / G5 when they act full, every other key 5 %",
+        m |= 1u << KEY_SNAP | 1u << KEY_OPEN;        /* (fork) SNAP and OPEN breathe: they would act */
+        check("BACKLIGHT ON, JAM: audible tracks full, SNAP and OPEN breathing, every other key 5 %",
               ui.mute && led_level(14u + KEY_TRK_KEY[5]) == 5u && led_level(14u + KEY_TRK_KEY[0]) == 100u &&
               keys_dim_except(m));
         release_all();
@@ -3435,9 +3185,7 @@ static void test_theme_menu(void)
 /* the menu row's value: s in F3 at 2x right-aligned at the row's end (list_row 10..225), the row's pen, 2 px clear */
 static int menu_value_is(uint32_t row, const char *s, int sel)
 {
-    uint32_t w = (uint32_t)md_text_w(&MD_F3, 2, s) + 4u, h = MENU_DY < 14u ? MENU_DY : 14u,   /* (13 px rows: the next
-                                                     * row's cursor bar starts on this one's last pixel row) */
-             x0 = 225u - 4u - (w - 4u) - 2u,
+    uint32_t w = (uint32_t)md_text_w(&MD_F3, 2, s) + 4u, h = 14u, x0 = 225u - 4u - (w - 4u) - 2u,
              y0 = MENU_Y0 + row * MENU_DY - 2u, x, y;
     uint16_t pen = sel ? C_BG : C_INK, gr = sel ? C_INK : C_BG;
     cv_begin(w, h, gr);
@@ -3839,7 +3587,7 @@ static void test_mute_boxes(void)
     trk[2].p[P_MUTE] = 1;
     glo_hold_frames(2);
     check("MUTE: 8 boxes, an audible track's solid; muting track 3 makes its box an outline", ui.mute && ok &&
-          !mute_box_filled(2) && mute_box_filled(1) && fb[MU_BY(2u) * 240u + MU_BX(2u) + 10u] == C_INK);
+          !mute_box_filled(2) && mute_box_filled(1) && fb[40u * 240u + 4u + 2u * 58u + 10u] == C_INK);
     trk[2].p[P_MUTE] = 0;
     release_all();
     ui_frame();
@@ -4896,7 +4644,7 @@ static void test_clock_screens(void)
     int16_t bpm;
     ui_host_init();
     while (!str_eq(cur_page()->title, "GLOBAL") || ui.home) {
-        press(B_GLO);
+        press(B_SAVE);
         ui_frame();
         release_all();
         ui_frame();
@@ -5058,9 +4806,9 @@ static void test_perform_page(void)
     release_all();
     ui_frame();
     check("PAGE: PLAY and OCT+ leave it open", ui.pg_open && perf_k[1] > 0);
-    tap(B_GLO);
+    tap(B_SAVE);
     check("PAGE: another page button closes it, the macros stay on", !ui.pg_open && !ui.layer && perf_k[1] > 0 &&
-          cur_fam() == FAM_GLO);
+          cur_fam() == FAM_SAVE);
     press(B_FX);
     fx_hold_frames(500);
     release_all();
@@ -9349,8 +9097,8 @@ static void test_fk_oct_breath(void)
     check("item 5: SOUND: OCT+ breathes (the LAYER pages)", fk_oct() == 4u);
     tap(B_OCTUP);
     check("item 5: LAYER: OCT- lit (back to SOUND)", cur_fam() == FAM_LAY && fk_oct() == 1u);
-    tap(B_GLO);
-    check("item 5: GLOBAL: dark", fk_oct() == 0u);
+    tap(B_SAVE);
+    check("item 5: PROJECT: dark", fk_oct() == 0u);
     ui.confirm = 1;
     ui.confirm_trk = 0;
     ui.force = 1;
@@ -10187,13 +9935,8 @@ int main(void)
     test_quick_mute();
     test_mute_screen();
     test_mute_screen_keys();
-    test_mute_latch();
-    test_mute_latch_play();
-    test_latch_v2_phase1();
-    test_latch_v2_phase2();
-    test_latch_v2_phase3();
-    test_latch_v2_phase4();
     test_mute_screen_refused();
+    test_jam();
     test_save_tap_opens_projects();
     test_cue_keys_no_notes();
     test_save_dead();

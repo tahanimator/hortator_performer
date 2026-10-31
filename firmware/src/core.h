@@ -83,7 +83,7 @@ enum {                          /* global parameters */
     G_COUNT
 };
 enum { CG_MUTE, CG_KEEP, CG_HIDE };                 /* GHOST: muted = muted; muted still keys; never heard, keys */
-enum { G_CLRALL = G_COUNT, G_INITALL, G_MUTEBAR, G_METRO, G_COPY, G_PASTE, G_THRU };   /* TOOLS actions, the MUTE and
+enum { G_CLRALL = G_COUNT, G_INITALL, G_MUTEBAR, G_METRO, G_COPY, G_PASTE, G_THRU, G_LEARN };   /* TOOLS actions, the MUTE and
                                                      * METRO settings, COPY / PASTE of a slot (spec 2026-10-26), the
                                                      * THRU setting (midi_out.c): shown like globals, not stored in
                                                      * projects */

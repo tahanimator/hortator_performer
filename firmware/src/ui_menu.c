@@ -1,14 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Felucca menu (HOME held): COLOR, SPEAKER EQ (FLAT LOWCUT BASS+), USB LEVEL (MASTER FIXED), USB AUDIO (2 CH 10 CH; not in the BLE build), PERFORM (HOLD PAGE), MUTE SCREEN (HOLD LATCH; fork: Meat Proxy), ZOOM, KNOB ACCEL, BACKLIGHT (OFF DIM LO DIM HI INV INV LO INV HI), HARDWARE CALIBRATION, (BLE build: BLUETOOTH,) ABOUT. */
+/* Felucca menu (HOME held): COLOR, SPEAKER EQ (FLAT LOWCUT BASS+), USB LEVEL (MASTER FIXED), USB AUDIO (2 CH 10 CH; not in the BLE build), PERFORM (HOLD PAGE), ZOOM, KNOB ACCEL, BACKLIGHT (OFF DIM LO DIM HI INV INV LO INV HI), HARDWARE CALIBRATION, (BLE build: BLUETOOTH,) ABOUT. */
 /* ------------------------------------------------------------ menu --- */
 #if FELUCCA_BLE                                     /* the Bluetooth page's row (bt_page.c) before ABOUT */
 /* (no USB AUDIO row: 10 CH is the standard build's only, fx.c USB10_BUILD) */
-enum { MI_COLOR, MI_SPKEQ, MI_USB, MI_PERF, MI_MUTE, MI_ZOOM, MI_ACCEL, MI_BACKLIGHT, MI_PANEL, MI_BT, MI_ABOUT, MI_BACK,
-       MI_COUNT };
-static const char *const MI_NAME[MI_COUNT] = {"COLOR", "SPEAKER EQ", "USB LEVEL", "PERFORM", "MUTE SCREEN", "ZOOM",
-                                              "ACCEL", "BACKLIGHT", "HARDWARE CALIBRATION", "BLUETOOTH", "ABOUT", "BACK"};
-#define MENU_DY 13u                                 /* twelve rows above the hints (screen y) */
+enum { MI_COLOR, MI_SPKEQ, MI_USB, MI_PERF, MI_ZOOM, MI_ACCEL, MI_BACKLIGHT, MI_PANEL, MI_BT, MI_ABOUT, MI_BACK, MI_COUNT };
+static const char *const MI_NAME[MI_COUNT] = {"COLOR", "SPEAKER EQ", "USB LEVEL", "PERFORM", "ZOOM", "ACCEL",
+                                              "BACKLIGHT", "HARDWARE CALIBRATION", "BLUETOOTH", "ABOUT", "BACK"};
+#define MENU_DY 14u                                 /* eleven rows above the hints (screen y) */
 #define MENU_HY 196u
 static void bt_page_open(void);                     /* bt_page.c (after ble/ble_core.h): ui.menu 3 */
 static void bt_page_close(void);
@@ -16,20 +15,19 @@ static void bt_page_draw(void);
 static void bt_page_input(uint32_t pressed);
 static void bt_autostart(void);                     /* AUTOSTART: once, 5 s after power-on (ui_input only, gate 3) */
 #else
-enum { MI_COLOR, MI_SPKEQ, MI_USB, MI_USBAUD, MI_PERF, MI_MUTE, MI_ZOOM, MI_ACCEL, MI_BACKLIGHT, MI_PANEL, MI_ABOUT,
-       MI_BACK, MI_COUNT };
-static const char *const MI_NAME[MI_COUNT] = {"COLOR", "SPEAKER EQ", "USB LEVEL", "USB AUDIO", "PERFORM",
-                                              "MUTE SCREEN", "ZOOM", "ACCEL", "BACKLIGHT", "HARDWARE CALIBRATION",
-                                              "ABOUT", "BACK"};
-#define MENU_DY 13u                                 /* twelve rows above the hints (screen y) */
+enum { MI_COLOR, MI_SPKEQ, MI_USB, MI_USBAUD, MI_PERF, MI_ZOOM, MI_ACCEL, MI_BACKLIGHT, MI_PANEL, MI_ABOUT, MI_BACK,
+       MI_COUNT };
+static const char *const MI_NAME[MI_COUNT] = {"COLOR", "SPEAKER EQ", "USB LEVEL", "USB AUDIO", "PERFORM", "ZOOM",
+                                              "ACCEL", "BACKLIGHT", "HARDWARE CALIBRATION", "ABOUT", "BACK"};
+#define MENU_DY 14u                                 /* eleven rows above the hints (screen y) */
 #define MENU_HY 196u
 #endif
 #define MENU_Y0 40u                                 /* the first row (screen y), inside the MENU window */
 static const char *const SPK_EQ[3] = {"FLAT", "LOWCUT", "BASS+"};   /* settings.lowcut (fx_lowcut) */
 static uint32_t *menu_onoff(uint32_t i)            /* an ON / OFF row's setting, 0 if none */
 {
-    return i == MI_USB ? &settings.usbfix : i == MI_PERF ? &settings.perfpage : i == MI_MUTE ? &mutelatch :
-           i == MI_ZOOM ? &settings.zoom : i == MI_ACCEL ? &settings.accel : 0;
+    return i == MI_USB ? &settings.usbfix : i == MI_PERF ? &settings.perfpage : i == MI_ZOOM ? &settings.zoom :
+           i == MI_ACCEL ? &settings.accel : 0;
 }
 #if USB8_OK
 
@@ -192,7 +190,7 @@ static void draw_menu(void)
     uint32_t i, pass, fr = fm1_ms / 66u,
                       sig = ui.menu * 7u + ui.menu_sel * 131u + settings.palette * 1009u + settings.lowcut * 7919u +
                             settings.zoom * 104729u + settings.accel * 15485863u + settings.usbfix * 32452843u +
-                            settings.perfpage * 49979687u + backlight * 67867967u + mutelatch * 73856093u + USBAUD_SIG +
+                            settings.perfpage * 49979687u + backlight * 67867967u + USBAUD_SIG +
                             ui.about_top * 86028121u;
 #if FELUCCA_BLE
     if (ui.menu == 3u) {                            /* the Bluetooth page: its own drawing and signature */
@@ -239,7 +237,7 @@ static void draw_menu(void)
                 const char *v = 0;
                 if (menu_onoff(i))
                     v = i == MI_USB ? (*menu_onoff(i) ? "FIXED" : "MASTER") : i == MI_PERF ? (*menu_onoff(i) ? "PAGE" : "HOLD") :
-                        i == MI_MUTE ? (*menu_onoff(i) ? "LATCH" : "HOLD") : *menu_onoff(i) ? "ON" : "OFF";
+                        *menu_onoff(i) ? "ON" : "OFF";
 #if USB10_BUILD
                 if (i == MI_USBAUD)
                     v = USBAUD_NAME[usbaud % UA_COUNT];

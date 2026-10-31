@@ -39,13 +39,14 @@ static const page_t PAGES[] = {
     {"PATTERN", FAM_SEQ, SC_TRACK, GR_STEPS, {P_SLEN, P_SDIV, P_SSWING, P_SRC}},
     {"MOTION", FAM_SEQ, SC_TRACK, GR_MOTION, {0xFF, 0xFF, 0xFF, 0xFF}},   /* PLAY EVENT - CLEAR (motion.c) */
     {"SONG", FAM_SEQ, SC_GLOBAL, GR_SONG, {0xFF, 0xFF, 0xFF, 0xFF}},   /* ROW SLOT REPS LOOP (song.c) */
-    {"GLOBAL", FAM_GLO, SC_GLOBAL, GR_NONE, {G_BPM, G_SWING, G_CLOCK, G_DRCH}},
-    {"SYSTEM", FAM_GLO, SC_GLOBAL, GR_NONE, {G_MIDI, G_SYNC, G_ROUTE, G_INFO}},
-    {"GLOBAL", FAM_GLO, SC_GLOBAL, GR_NONE, {G_MUTEBAR, G_METRO, G_THRU, 0xFF}},   /* device settings (settings.mutebar,
-                                                                                  * fx_metro, midi_thru) */
     {"PROJECT", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, G_NAME, G_LOAD, G_SAVE}},   /* NAME: rename (ui_name.c) */
     {"TOOLS", FAM_SAVE, SC_GLOBAL, GR_NONE, {G_CLRSEQ, G_INITSND, G_CLRALL, G_INITALL}},   /* track; all */
     {"COPY", FAM_SAVE, SC_GLOBAL, GR_SLOTS, {G_SLOT, G_COPY, G_PASTE, 0xFF}},   /* a slot's COPY / PASTE (project.c) */
+    /* fork (Meat Proxy): GLO is JAM's alone (jam.c); its pages are SAVE's, after COPY: setting up, not playing */
+    {"GLOBAL", FAM_SAVE, SC_GLOBAL, GR_NONE, {G_BPM, G_SWING, G_CLOCK, G_DRCH}},
+    {"SYSTEM", FAM_SAVE, SC_GLOBAL, GR_NONE, {G_MIDI, G_SYNC, G_ROUTE, G_INFO}},
+    {"DEVICE", FAM_SAVE, SC_GLOBAL, GR_NONE, {G_MUTEBAR, G_METRO, G_THRU, G_LEARN}},   /* device settings (settings.mutebar,
+                                                                                  * fx_metro, midi_thru), MIDI LEARN */
     {"GRIDS", FAM_GRIDS, SC_GLOBAL, GR_GRIDS, {G_GMODE, G_GX, G_GY, G_GCHAOS}},   /* EUCLID: MODE LEN K S H */
     {"GRIDS", FAM_GRIDS, SC_GLOBAL, GR_GRIDS, {G_GFILL1, G_GFILL2, G_GFILL3, 0xFF}},
     /* LFO: both LFOs on every page, LFO 1 on KNOB 1-2, LFO 2 on KNOB 3-4; then DEST, the track's 4 slots: KNOB 1 the
@@ -99,12 +100,17 @@ static uint32_t page_id(const page_t *pg, uint32_t slot)
     return id;
 }
 
+static int16_t learn_act;                         /* DEVICE's LEARN knob: ui.ml.on (ui_input keeps it in step) */
 static const param_desc_t *page_desc(const page_t *pg, uint32_t slot, int16_t **valp)
 {
     uint32_t id = page_id(pg, slot);
     *valp = 0;
     if (id == 0xFFu || pg->scope == SC_GRID || pg->scope == SC_MIX)
         return 0;
+    if (pg->scope == SC_GLOBAL && id == G_LEARN) {   /* (fork) LEARN: MIDI LEARN on / off, ui.ml.on */
+        *valp = &learn_act;
+        return &GP_ACT[7];
+    }
     if (pg->scope == SC_GLOBAL && id >= G_COUNT) {   /* TOOLS actions, MUTE, METRO, COPY / PASTE, THRU */
         id = id - G_COUNT < 7u ? id - G_COUNT : 0u;
         *valp = &song.act[id < 4u ? id : id < 6u ? id - 4u : 4u];   /* (COPY / PASTE: GO buttons, 0 at rest: CLR* /
